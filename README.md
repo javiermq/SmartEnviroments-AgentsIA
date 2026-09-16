@@ -66,3 +66,26 @@ VRAM para el contexto y el sistema.
 **Respuesta esperada del agente:** «En los datos simulados aparecen 8 h 45 min
 de sueño. Es una duración suficiente para la mayoría de adultos, aunque este
 registro no mide la calidad clínica ni los despertares.»
+
+## Prueba conversacional con traza
+
+Con Ollama ejecutándose, inicia una sesión en una hora de referencia concreta:
+
+```powershell
+& "C:/Users/Javier/AppData/Local/Programs/Python/Python311/python.exe" `
+  smart_home_agent/conversation_demo.py `
+  --t0 "2026-09-16T18:56:00+02:00"
+```
+
+O realiza un único turno de prueba:
+
+```powershell
+& "C:/Users/Javier/AppData/Local/Programs/Python/Python311/python.exe" `
+  smart_home_agent/conversation_demo.py `
+  --t0 "2026-09-16T18:56:00+02:00" `
+  --question "¿He dormido bien?"
+```
+
+La consola muestra el nombre de la función, argumentos y resultado de cada
+llamada. Por seguridad y diseño, la traza no expone razonamiento interno
+oculto del modelo.
