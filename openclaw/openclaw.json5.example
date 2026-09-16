@@ -1,0 +1,39 @@
+{
+  // Copia esta sección en ~/.openclaw/openclaw.json y sustituye las rutas.
+  agents: {
+    defaults: {
+      model: { primary: "ollama/qwen3:4b" },
+    },
+  },
+  models: {
+    providers: {
+      ollama: {
+        baseUrl: "http://127.0.0.1:11434",
+        apiKey: "ollama-local",
+        api: "ollama",
+        timeoutSeconds: 300,
+        models: [
+          {
+            id: "qwen3:4b",
+            name: "Qwen3 4B local",
+            reasoning: true,
+            input: ["text"],
+            contextTokens: 8192,
+            maxTokens: 2048,
+            params: { num_ctx: 8192, thinking: false, keep_alive: "15m" },
+          },
+        ],
+      },
+    },
+  },
+  mcp: {
+    servers: {
+      smart_home_sensors: {
+        command: "C:/Users/Javier/AppData/Local/Programs/Python/Python311/python.exe",
+        args: ["C:/Users/Javier/Documents/GitHub/SmartEnviroments-AgentsIA/smart_home_agent/mcp_sensor_server.py"],
+        cwd: "C:/Users/Javier/Documents/GitHub/SmartEnviroments-AgentsIA/smart_home_agent",
+        requestTimeoutMs: 10000,
+      },
+    },
+  },
+}
