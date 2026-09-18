@@ -110,7 +110,52 @@ cuando se usa el modo consola.
 
 ## Puente humano para probar Reachy sin LLM
 
-En el portátil, inicia un servidor que habla el protocolo de Ollama pero deja
+### Lanzadores por defecto: STT Turbo + eco + TTS remoto
+
+Este es el modo de validación recomendado antes de añadir el LLM: Reachy
+captura el audio, el portátil transcribe con Faster-Whisper `turbo`, devuelve
+el mismo texto y lo sintetiza con Piper. No utiliza Ollama ni el servidor.
+
+En el portátil Windows, con una voz Piper ya descargada en `$voice`, inicia el
+bridge:
+
+```powershell
+& "C:\Users\Javier\AppData\Local\Programs\Python\Python311\python.exe" -u `
+  smart_home_agent\human_console_bridge.py `
+  --host 0.0.0.0 --port 11435 `
+  --stt-model turbo --stt-device auto `
+  --tts-model "$voice" `
+  --chat-mode echo --trace
+```
+
+En Reachy, con `REMOTE_STT_URL` y `REMOTE_TTS_URL` apuntando al portátil,
+arranca el agente:
+
+```dotenv
+REMOTE_STT_URL=http://192.168.0.28:11435/stt
+REMOTE_TTS_URL=http://192.168.0.28:11435/tts
+OLLAMA_URL=http://192.168.0.28:11435/api/chat
+OLLAMA_MODEL=human-console
+```
+
+```bash
+python main.py \
+  --interface reachy \
+  --t0 "2026-09-16T18:56:00+02:00" \
+  --trace \
+  --speech-rms-threshold 0.03
+```
+
+El reproductor de Reachy añade por defecto 0,20 segundos de silencio antes de
+la respuesta para no perder la primera sílaba. Si fuese necesario, puede
+ajustarse con `--tts-leading-silence-seconds 0.30`.
+
+Los últimos 100 WAV que recibe el STT quedan en `temp_data/` del portátil; al
+llegar al número 101 se vuelve a escribir el primer archivo.
+
+### Modo humano manual
+
+También puede iniciarse un servidor que habla el protocolo de Ollama pero deja
 que una persona escriba cada respuesta:
 
 ```powershell
