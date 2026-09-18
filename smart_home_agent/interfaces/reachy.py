@@ -277,7 +277,9 @@ class ReachyInterface(ConversationInterface):
         audio = AudioClip(np.concatenate(chunks, axis=0), self.robot.media.get_input_audio_samplerate())
         text = (await self.stt.transcribe(audio)).strip()
         if not text:
-            raise AudioError("STT no devolvió texto.")
+            LOGGER.info("STT no devolvió texto; se descarta el turno y se sigue escuchando.")
+            self.state = InterfaceState.ACTIVE
+            return ""
         self.state = InterfaceState.ACTIVE
         return text
 

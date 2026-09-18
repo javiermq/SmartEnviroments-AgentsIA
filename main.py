@@ -43,6 +43,9 @@ async def run(args: argparse.Namespace) -> None:
                 user_text = await interface.listen()
             except KeyboardInterrupt:
                 break
+            except (RuntimeError, TimeoutError) as exc:
+                logging.warning("Turno de audio descartado: %s", exc)
+                continue
             if interface_name == "console" and user_text.lower() in {"salir", "exit", "quit"}:
                 break
             if not user_text:
