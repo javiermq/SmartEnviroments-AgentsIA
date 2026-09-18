@@ -89,3 +89,16 @@ O realiza un único turno de prueba:
 La consola muestra el nombre de la función, argumentos y resultado de cada
 llamada. Por seguridad y diseño, la traza no expone razonamiento interno
 oculto del modelo.
+
+## Interfaces intercambiables
+
+El entrypoint general es `main.py`. Mantiene Qwen y las tools en
+`ConversationBackend` y permite cambiar el frontend:
+
+```powershell
+python main.py --interface console --t0 "2026-09-16T18:56:00+02:00" --trace
+```
+
+La interfaz Reachy Mini se documenta en
+[`docs/REACHY_DEPLOYMENT.md`](docs/REACHY_DEPLOYMENT.md). No se importa su SDK
+cuando se usa el modo consola.

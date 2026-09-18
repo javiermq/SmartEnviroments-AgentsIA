@@ -1,0 +1,5 @@
+# Instalar solo en el virtualenv dedicado del Reachy Mini.
+reachy-mini>=1.10,<2
+numpy>=1.26
+faster-whisper>=1.1
+piper-tts>=1.3

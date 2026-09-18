@@ -1,0 +1,19 @@
+[Unit]
+Description=Smart Environments voice agent for Reachy Mini
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Sustituye REACHY_USER, PROJECT_DIR y VENV_DIR antes de copiar este fichero.
+Type=simple
+User=REACHY_USER
+WorkingDirectory=PROJECT_DIR
+EnvironmentFile=-PROJECT_DIR/.env
+ExecStart=VENV_DIR/bin/python PROJECT_DIR/main.py --interface reachy --t0 2026-09-16T18:56:00+02:00 --trace
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
