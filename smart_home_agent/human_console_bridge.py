@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import site
 import threading
 import time
@@ -43,6 +44,12 @@ AUTOMATIC_RESPONSES = (
     "Prueba completada: respuesta local generada.",
 )
 SAVE_SIZE_SAMPLES = 100
+SAMPLE_GESTURES = (
+    {"name": "alerta", "antennas_deg": [28, 28]},
+    {"name": "curiosa_derecha", "antennas_deg": [34, 8]},
+    {"name": "curiosa_izquierda", "antennas_deg": [8, 34]},
+    {"name": "relajada", "antennas_deg": [-18, -18]},
+)
 
 
 class ReceivedWavRing:
@@ -87,8 +94,17 @@ def configure_windows_cuda_dlls() -> None:
         os.environ["PATH"] = os.pathsep.join(paths + [os.environ.get("PATH", "")])
 
 
-def assistant_message(answer: str) -> dict[str, Any]:
-    return {"model": "human-console", "created_at": datetime.now(timezone.utc).isoformat(), "message": {"role": "assistant", "content": answer}, "done": True}
+def assistant_message(answer: str, gesture: dict[str, Any] | None = None) -> dict[str, Any]:
+    message: dict[str, Any] = {"role": "assistant", "content": answer}
+    if gesture is not None:
+        message["gesture"] = gesture
+    return {"model": "human-console", "created_at": datetime.now(timezone.utc).isoformat(), "message": message, "done": True}
+
+
+def sample_gesture() -> dict[str, Any]:
+    """Devuelve una copia para que cada respuesta tenga su gesto independiente."""
+    gesture = random.choice(SAMPLE_GESTURES)
+    return {"name": gesture["name"], "antennas_deg": list(gesture["antennas_deg"])}
 
 
 def tool_message(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -314,14 +330,13 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_w
                 elif ollama_url:
                     status, body = forward_to_ollama(ollama_url, body_in, trace)
                 elif automatic:
-                    import random
-
                     answer = random.choice(AUTOMATIC_RESPONSES)
+                    gesture = sample_gesture()
                     if trace:
                         _trace_chat_request(body_in)
-                        print(f"AUTOMÁTICO → Reachy: {answer}")
+                        print(f"AUTOMÁTICO → Reachy: {answer} | gesto={gesture}")
                     status = HTTPStatus.OK
-                    body = json.dumps(assistant_message(answer), ensure_ascii=False).encode("utf-8")
+                    body = json.dumps(assistant_message(answer, gesture), ensure_ascii=False).encode("utf-8")
                 elif echo:
                     payload = json.loads(body_in.decode("utf-8"))
                     messages = payload.get("messages", []) if isinstance(payload, dict) else []
@@ -329,10 +344,11 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_w
                     answer = str(user.get("content", "")).strip()
                     if not answer:
                         raise ValueError("/api/chat no recibió texto de usuario para eco")
+                    gesture = sample_gesture()
                     if trace:
-                        print(f"ECO → Reachy: {answer}")
+                        print(f"ECO → Reachy: {answer} | gesto={gesture}")
                     status = HTTPStatus.OK
-                    body = json.dumps(assistant_message(answer), ensure_ascii=False).encode("utf-8")
+                    body = json.dumps(assistant_message(answer, gesture), ensure_ascii=False).encode("utf-8")
                 else:
                     payload = json.loads(body_in.decode("utf-8"))
                     if not isinstance(payload, dict):

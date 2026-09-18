@@ -40,6 +40,7 @@ class ConversationBackend:
         self.model = model
         self.ollama_url = ollama_url
         self.messages: list[dict[str, Any]] = [{"role": "system", "content": self._system_prompt(t0)}]
+        self.last_gesture: dict[str, Any] | None = None
 
     @staticmethod
     def _system_prompt(t0: str) -> str:
@@ -52,10 +53,14 @@ calidad del sueño, aclara que solo hay una estimación de duración y no una
 medición clínica. No inventes datos ni expliques razonamiento interno."""
 
     def respond(self, user_text: str, trace: TraceCallback | None = None) -> str:
+        self.last_gesture = None
         self.messages.append({"role": "user", "content": user_text})
         for round_number in range(1, 5):
             assistant = self._request_ollama()
             assistant = {**assistant, "content": self._visible_answer(assistant.get("content", ""))}
+            gesture = assistant.get("gesture")
+            if isinstance(gesture, dict):
+                self.last_gesture = gesture
             self.messages.append(assistant)
             calls = assistant.get("tool_calls", [])
             if not calls:

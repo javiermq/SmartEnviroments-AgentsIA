@@ -18,7 +18,7 @@ import wave
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -233,6 +233,25 @@ class ReachyInterface(ConversationInterface):
         self.tts_leading_silence_seconds = max(0.0, tts_leading_silence_seconds)
         self.expressive_motion = expressive_motion
         self._gesture_task: asyncio.Task[object] | None = None
+        self._response_antennas_deg: tuple[float, float] | None = None
+        self._response_gesture_name = "predeterminado"
+
+    def set_response_gesture(self, gesture: dict[str, Any] | None) -> None:
+        """Acepta solo gestos de antenas pequeños procedentes del bridge/LLM."""
+        self._response_antennas_deg = None
+        self._response_gesture_name = "predeterminado"
+        if not isinstance(gesture, dict):
+            return
+        angles = gesture.get("antennas_deg")
+        if not isinstance(angles, list) or len(angles) != 2:
+            LOGGER.warning("Gesto ignorado: antennas_deg debe contener dos valores.")
+            return
+        if not all(isinstance(angle, (int, float)) and -35 <= angle <= 35 for angle in angles):
+            LOGGER.warning("Gesto ignorado: ángulos de antena fuera del rango seguro [-35, 35].")
+            return
+        self._response_antennas_deg = (float(angles[0]), float(angles[1]))
+        name = gesture.get("name")
+        self._response_gesture_name = name if isinstance(name, str) else "sin nombre"
 
     async def start(self) -> None:
         try:
@@ -376,7 +395,7 @@ class ReachyInterface(ConversationInterface):
         except Exception as exc:
             LOGGER.warning("No se pudo activar wobbling: %s", exc)
         if self.expressive_motion:
-            self._start_gesture(self._speaking_gesture, "inicio de habla")
+            self._start_gesture(self._speaking_gesture, f"inicio de habla ({self._response_gesture_name})")
 
     async def on_idle(self) -> None:
         # Al finalizar el audio se elimina cualquier offset que haya dejado el
@@ -403,8 +422,9 @@ class ReachyInterface(ConversationInterface):
         """Antenas abiertas mientras habla: visible y seguro para una primera prueba."""
         import numpy as np
 
+        antennas_deg = self._response_antennas_deg or (32.0, -32.0)
         self.robot.goto_target(
-            antennas=np.deg2rad([32, -32]), duration=0.35, method="cartoon", body_yaw=None,
+            antennas=np.deg2rad(antennas_deg), duration=0.35, method="cartoon", body_yaw=None,
         )
 
     def _idle_gesture(self) -> None:

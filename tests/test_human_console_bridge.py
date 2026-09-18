@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from smart_home_agent.human_console_bridge import ReceivedWavRing, assistant_message, tool_message
+from smart_home_agent.human_console_bridge import ReceivedWavRing, assistant_message, sample_gesture, tool_message
 
 
 class HumanConsoleBridgeTests(unittest.TestCase):
@@ -16,6 +16,12 @@ class HumanConsoleBridgeTests(unittest.TestCase):
         call = response["message"]["tool_calls"][0]["function"]
         self.assertEqual(call["name"], "query_aggregation")
         self.assertEqual(call["arguments"]["sensor_type"], "watch.sleep")
+
+    def test_sample_gesture_has_two_safe_antenna_angles(self):
+        gesture = sample_gesture()
+        self.assertIsInstance(gesture["name"], str)
+        self.assertEqual(len(gesture["antennas_deg"]), 2)
+        self.assertTrue(all(-35 <= angle <= 35 for angle in gesture["antennas_deg"]))
 
     def test_received_wav_ring_overwrites_first_slot_after_capacity(self):
         with TemporaryDirectory() as temporary:

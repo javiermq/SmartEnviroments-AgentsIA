@@ -16,6 +16,15 @@ class ConversationBackendTests(unittest.TestCase):
         backend._request_ollama = lambda: next(responses)  # type: ignore[method-assign]
         self.assertEqual(backend.respond("¿Cuántos pasos hice?"), "Has hecho 4855 pasos.")
 
+    def test_keeps_gesture_from_bridge_response(self):
+        backend = ConversationBackend("2026-09-16T18:56:00+02:00")
+        backend._request_ollama = lambda: {  # type: ignore[method-assign]
+            "content": "Hola.", "tool_calls": [],
+            "gesture": {"name": "curiosa", "antennas_deg": [20, 8]},
+        }
+        self.assertEqual(backend.respond("Hola"), "Hola.")
+        self.assertEqual(backend.last_gesture, {"name": "curiosa", "antennas_deg": [20, 8]})
+
 
 if __name__ == "__main__":
     unittest.main()

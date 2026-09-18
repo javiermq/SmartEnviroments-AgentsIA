@@ -59,6 +59,8 @@ async def run(args: argparse.Namespace) -> None:
             print(f"USUARIO  > {user_text}")
             await interface.on_thinking()
             response = await asyncio.to_thread(backend.respond, user_text, trace_to_console if args.trace else None)
+            if interface_name == "reachy":
+                interface.set_response_gesture(backend.last_gesture)
             await interface.speak(response)
     finally:
         await interface.close()

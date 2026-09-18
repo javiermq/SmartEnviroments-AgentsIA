@@ -143,7 +143,8 @@ python main.py \
   --interface reachy \
   --t0 "2026-09-16T18:56:00+02:00" \
   --trace \
-  --speech-rms-threshold 0.03
+  --speech-rms-threshold 0.03 \
+  --expressive-motion
 ```
 
 El reproductor de Reachy añade por defecto 0,20 segundos de silencio antes de
@@ -152,6 +153,11 @@ ajustarse con `--tts-leading-silence-seconds 0.30`.
 
 Los últimos 100 WAV que recibe el STT quedan en `temp_data/` del portátil; al
 llegar al número 101 se vuelve a escribir el primer archivo.
+
+En modo `echo` y `automatic`, el bridge adjunta un gesto de antenas de una
+lista limitada a cada respuesta. Reachy valida que los dos ángulos estén en el
+rango seguro de -35° a 35° antes de ejecutarlo. Qwen podrá usar este mismo
+campo `gesture` cuando se active el modo LLM.
 
 ### Modo humano manual
 
