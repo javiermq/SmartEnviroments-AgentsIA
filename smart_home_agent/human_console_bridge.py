@@ -19,6 +19,28 @@ from urllib.request import Request, urlopen
 
 
 CUDA_DLL_DIRECTORIES: list[object] = []
+AUTOMATIC_RESPONSES = (
+    "Recibido. Estoy listo para continuar.",
+    "Entendido, la comunicación funciona correctamente.",
+    "Perfecto, he recibido tu mensaje.",
+    "De acuerdo, sigo atento a tus indicaciones.",
+    "La prueba de respuesta automática ha sido completada.",
+    "Hola, te escucho con claridad.",
+    "Gracias, la conexión está activa.",
+    "Confirmado, puedo responder de inmediato.",
+    "Todo está funcionando como se esperaba.",
+    "Mensaje recibido sin necesidad de consultar el modelo.",
+    "Estoy preparado para el siguiente turno.",
+    "La transmisión de audio se ha procesado correctamente.",
+    "Respuesta automática enviada desde el servidor.",
+    "Sí, sigo conectado y disponible.",
+    "La latencia de esta prueba no incluye Ollama.",
+    "Confirmo que el canal de voz está operativo.",
+    "He entendido tu petición.",
+    "El sistema de prueba responde correctamente.",
+    "Puedes continuar cuando quieras.",
+    "Prueba completada: respuesta local generada.",
+)
 
 
 def configure_windows_cuda_dlls() -> None:
@@ -130,19 +152,19 @@ class LocalSTT:
                 wav_path.unlink(missing_ok=True)
 
 
-def _trace_ollama_request(body: bytes) -> None:
+def _trace_chat_request(body: bytes) -> None:
     try:
         payload = json.loads(body.decode("utf-8"))
         messages = payload.get("messages", [])
         latest = messages[-1] if messages else {}
         print("\n" + "=" * 72)
         if latest.get("role") == "tool":
-            print(f"HERRAMIENTA → Ollama: {latest.get('content', '')}")
+            print(f"HERRAMIENTA → chat: {latest.get('content', '')}")
         else:
             user = next((message for message in reversed(messages) if message.get("role") == "user"), {})
-            print(f"REACHY → Ollama: {user.get('content', '')}")
+            print(f"REACHY → chat: {user.get('content', '')}")
     except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
-        print("REACHY → Ollama: solicitud no interpretable")
+        print("REACHY → chat: solicitud no interpretable")
 
 
 def _trace_ollama_response(body: bytes, elapsed: float) -> None:
@@ -166,7 +188,7 @@ def _trace_ollama_response(body: bytes, elapsed: float) -> None:
 def forward_to_ollama(ollama_url: str, body: bytes, trace: bool) -> tuple[int, bytes]:
     """Proxy local: Reachy nunca necesita acceder al puerto de Ollama."""
     if trace:
-        _trace_ollama_request(body)
+        _trace_chat_request(body)
     request = Request(ollama_url, data=body, method="POST", headers={"Content-Type": "application/json"})
     try:
         started = time.monotonic()
@@ -181,7 +203,7 @@ def forward_to_ollama(ollama_url: str, body: bytes, trace: bool) -> tuple[int, b
         raise RuntimeError(f"No se puede conectar con Ollama local ({ollama_url}): {exc}") from exc
 
 
-def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None, trace: bool) -> type[BaseHTTPRequestHandler]:
+def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None, automatic: bool, trace: bool) -> type[BaseHTTPRequestHandler]:
     class BridgeHandler(BaseHTTPRequestHandler):
         server_version = "HumanConsoleBridge/1.0"
 
@@ -216,6 +238,15 @@ def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None, t
                     body = json.dumps(response, ensure_ascii=False).encode("utf-8")
                 elif ollama_url:
                     status, body = forward_to_ollama(ollama_url, body_in, trace)
+                elif automatic:
+                    import random
+
+                    answer = random.choice(AUTOMATIC_RESPONSES)
+                    if trace:
+                        _trace_chat_request(body_in)
+                        print(f"AUTOMÁTICO → Reachy: {answer}")
+                    status = HTTPStatus.OK
+                    body = json.dumps(assistant_message(answer), ensure_ascii=False).encode("utf-8")
                 else:
                     payload = json.loads(body_in.decode("utf-8"))
                     if not isinstance(payload, dict):
@@ -241,15 +272,16 @@ def main() -> None:
     parser.add_argument("--port", default=11435, type=int)
     parser.add_argument("--stt-model", default="base", help="Modelo Faster-Whisper local del portátil")
     parser.add_argument("--stt-device", choices=["auto", "cuda", "cpu"], default="auto")
-    parser.add_argument("--chat-mode", choices=["human", "ollama"], default="human")
+    parser.add_argument("--chat-mode", choices=["human", "ollama", "automatic"], default="human")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/chat")
     parser.add_argument("--trace", action="store_true", help="Muestra solicitudes, tools y respuestas de Ollama")
     args = parser.parse_args()
     ollama_url = args.ollama_url if args.chat_mode == "ollama" else None
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), ollama_url, args.trace))
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), ollama_url, args.chat_mode == "automatic", args.trace))
     print(f"Human Console Bridge escuchando en http://{args.host}:{args.port}/api/chat")
     print(f"STT local disponible en http://{args.host}:{args.port}/stt ({args.stt_model}, {args.stt_device})")
-    print(f"Chat: {'Ollama local en ' + ollama_url if ollama_url else 'respuesta humana por consola'}")
+    chat_status = "Ollama local en " + ollama_url if ollama_url else ("respuesta automática aleatoria" if args.chat_mode == "automatic" else "respuesta humana por consola")
+    print(f"Chat: {chat_status}")
     print("Ctrl+C para detenerlo. No lo expongas a Internet.")
     try:
         server.serve_forever()
