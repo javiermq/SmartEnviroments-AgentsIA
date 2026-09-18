@@ -130,19 +130,58 @@ class LocalSTT:
                 wav_path.unlink(missing_ok=True)
 
 
-def forward_to_ollama(ollama_url: str, body: bytes) -> tuple[int, bytes]:
+def _trace_ollama_request(body: bytes) -> None:
+    try:
+        payload = json.loads(body.decode("utf-8"))
+        messages = payload.get("messages", [])
+        latest = messages[-1] if messages else {}
+        print("\n" + "=" * 72)
+        if latest.get("role") == "tool":
+            print(f"HERRAMIENTA → Ollama: {latest.get('content', '')}")
+        else:
+            user = next((message for message in reversed(messages) if message.get("role") == "user"), {})
+            print(f"REACHY → Ollama: {user.get('content', '')}")
+    except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+        print("REACHY → Ollama: solicitud no interpretable")
+
+
+def _trace_ollama_response(body: bytes, elapsed: float) -> None:
+    try:
+        message = json.loads(body.decode("utf-8")).get("message", {})
+        calls = message.get("tool_calls", [])
+        for call in calls:
+            function = call.get("function", {})
+            print(f"OLLAMA tool_call: {function.get('name')}({json.dumps(function.get('arguments', {}), ensure_ascii=False)})")
+        content = message.get("content", "").strip()
+        if content:
+            print(f"OLLAMA → Reachy ({elapsed:.2f} s): {content}")
+        elif calls:
+            print(f"OLLAMA → Reachy ({elapsed:.2f} s): [esperando resultado de herramienta]")
+        else:
+            print(f"OLLAMA → Reachy ({elapsed:.2f} s): [respuesta vacía]")
+    except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+        print(f"OLLAMA → Reachy ({elapsed:.2f} s): respuesta no interpretable")
+
+
+def forward_to_ollama(ollama_url: str, body: bytes, trace: bool) -> tuple[int, bytes]:
     """Proxy local: Reachy nunca necesita acceder al puerto de Ollama."""
+    if trace:
+        _trace_ollama_request(body)
     request = Request(ollama_url, data=body, method="POST", headers={"Content-Type": "application/json"})
     try:
+        started = time.monotonic()
         with urlopen(request, timeout=180) as response:
-            return response.status, response.read()
+            response_body = response.read()
+            if trace:
+                _trace_ollama_response(response_body, time.monotonic() - started)
+            return response.status, response_body
     except HTTPError as exc:
         return exc.code, exc.read()
     except URLError as exc:
         raise RuntimeError(f"No se puede conectar con Ollama local ({ollama_url}): {exc}") from exc
 
 
-def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None) -> type[BaseHTTPRequestHandler]:
+def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None, trace: bool) -> type[BaseHTTPRequestHandler]:
     class BridgeHandler(BaseHTTPRequestHandler):
         server_version = "HumanConsoleBridge/1.0"
 
@@ -176,7 +215,7 @@ def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None) -
                     status = HTTPStatus.OK
                     body = json.dumps(response, ensure_ascii=False).encode("utf-8")
                 elif ollama_url:
-                    status, body = forward_to_ollama(ollama_url, body_in)
+                    status, body = forward_to_ollama(ollama_url, body_in, trace)
                 else:
                     payload = json.loads(body_in.decode("utf-8"))
                     if not isinstance(payload, dict):
@@ -204,9 +243,10 @@ def main() -> None:
     parser.add_argument("--stt-device", choices=["auto", "cuda", "cpu"], default="auto")
     parser.add_argument("--chat-mode", choices=["human", "ollama"], default="human")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/chat")
+    parser.add_argument("--trace", action="store_true", help="Muestra solicitudes, tools y respuestas de Ollama")
     args = parser.parse_args()
     ollama_url = args.ollama_url if args.chat_mode == "ollama" else None
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), ollama_url))
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), ollama_url, args.trace))
     print(f"Human Console Bridge escuchando en http://{args.host}:{args.port}/api/chat")
     print(f"STT local disponible en http://{args.host}:{args.port}/stt ({args.stt_model}, {args.stt_device})")
     print(f"Chat: {'Ollama local en ' + ollama_url if ollama_url else 'respuesta humana por consola'}")
