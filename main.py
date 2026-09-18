@@ -35,6 +35,7 @@ async def run(args: argparse.Namespace) -> None:
             speech_rms_threshold=args.speech_rms_threshold,
             speech_pre_roll_seconds=args.speech_pre_roll_seconds,
             tts_leading_silence_seconds=args.tts_leading_silence_seconds,
+            expressive_motion=args.expressive_motion,
         )
     else:
         raise ValueError("--interface debe ser console o reachy")
@@ -80,6 +81,10 @@ def main() -> None:
     parser.add_argument(
         "--tts-leading-silence-seconds", type=float, default=0.20,
         help="Silencio antes de la voz para no perder la primera sílaba (por defecto: 0.20 s).",
+    )
+    parser.add_argument(
+        "--expressive-motion", action="store_true",
+        help="Mueve las antenas al hablar y las devuelve a reposo al terminar.",
     )
     parser.add_argument("--trace", action="store_true", help="Muestra llamadas a herramientas y resultados.")
     args = parser.parse_args()

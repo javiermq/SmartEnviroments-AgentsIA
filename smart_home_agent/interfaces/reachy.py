@@ -18,7 +18,7 @@ import wave
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -214,6 +214,7 @@ class ReachyInterface(ConversationInterface):
         speech_rms_threshold: float = 0.02,
         speech_pre_roll_seconds: float = 0.35,
         tts_leading_silence_seconds: float = 0.20,
+        expressive_motion: bool = False,
     ):
         self.settings = settings
         stt_model = settings.stt_model_path or settings.stt_model
@@ -230,6 +231,8 @@ class ReachyInterface(ConversationInterface):
         self.speech_rms_threshold = speech_rms_threshold
         self.speech_pre_roll_seconds = max(0.0, speech_pre_roll_seconds)
         self.tts_leading_silence_seconds = max(0.0, tts_leading_silence_seconds)
+        self.expressive_motion = expressive_motion
+        self._gesture_task: asyncio.Task[object] | None = None
 
     async def start(self) -> None:
         try:
@@ -372,9 +375,37 @@ class ReachyInterface(ConversationInterface):
             await asyncio.to_thread(self.robot.enable_wobbling)
         except Exception as exc:
             LOGGER.warning("No se pudo activar wobbling: %s", exc)
+        if self.expressive_motion:
+            self._start_gesture(self._speaking_gesture, "inicio de habla")
 
     async def on_idle(self) -> None:
+        if self.expressive_motion:
+            self._start_gesture(self._idle_gesture, "vuelta a reposo")
         LOGGER.debug("Reachy en espera")
+
+    def _start_gesture(self, gesture: Callable[[], None], description: str) -> None:
+        """Programa gestos visibles sin bloquear STT, TTS ni la reproducción."""
+        if self.robot is None:
+            return
+        if self._gesture_task is not None and not self._gesture_task.done():
+            self._gesture_task.cancel()
+        self._gesture_task = asyncio.create_task(asyncio.to_thread(gesture))
+        LOGGER.info("Gesto Reachy programado: %s", description)
+
+    def _speaking_gesture(self) -> None:
+        """Antenas abiertas mientras habla: visible y seguro para una primera prueba."""
+        import numpy as np
+
+        self.robot.goto_target(
+            antennas=np.deg2rad([32, -32]), duration=0.35, method="cartoon", body_yaw=None,
+        )
+
+    def _idle_gesture(self) -> None:
+        import numpy as np
+
+        self.robot.goto_target(
+            antennas=np.deg2rad([0, 0]), duration=0.45, method="minjerk", body_yaw=None,
+        )
 
     async def close(self) -> None:
         robot, self.robot = self.robot, None
