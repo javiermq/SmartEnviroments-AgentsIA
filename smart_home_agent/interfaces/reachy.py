@@ -217,6 +217,7 @@ class ReachyInterface(ConversationInterface):
         )
         self.tts = tts or (RemoteTTS(remote_tts_url) if remote_tts_url else PiperTTS(settings.tts_model_path))
         self.robot = None
+        self._doa_available = True
 
     async def start(self) -> None:
         try:
@@ -251,10 +252,11 @@ class ReachyInterface(ConversationInterface):
         chunks, speech_started = [], False
         deadline = time.monotonic() + self.settings.conversation_timeout
         silence_seconds = float(os.getenv("SPEECH_SILENCE_SECONDS", "0.5"))
+        rms_threshold = float(os.getenv("SPEECH_RMS_THRESHOLD", "0.015"))
         silence_deadline = deadline
         while time.monotonic() < deadline:
             sample = await asyncio.to_thread(self.robot.media.get_audio_sample)
-            _, speech = await asyncio.to_thread(self.robot.media.get_DoA)
+            speech = await asyncio.to_thread(self._speech_detected, sample, rms_threshold)
             if speech:
                 speech_started = True
                 silence_deadline = time.monotonic() + silence_seconds
@@ -271,6 +273,26 @@ class ReachyInterface(ConversationInterface):
             raise AudioError("STT no devolvió texto.")
         self.state = InterfaceState.ACTIVE
         return text
+
+    def _speech_detected(self, sample: object, rms_threshold: float) -> bool:
+        """Usa DoA si está disponible; USB/DoA no debe derribar la conversación."""
+        if self._doa_available:
+            try:
+                _, speech = self.robot.media.get_DoA()
+                return bool(speech)
+            except Exception as exc:
+                self._doa_available = False
+                LOGGER.warning("DoA no disponible (%s); usando nivel de audio como VAD.", exc)
+        if sample is None:
+            return False
+        try:
+            import numpy as np
+
+            samples = np.asarray(sample, dtype=np.float32)
+            return bool(np.sqrt(np.mean(np.square(samples))) >= rms_threshold)
+        except Exception as exc:
+            LOGGER.warning("No se pudo estimar actividad de audio: %s", exc)
+            return False
 
     async def speak(self, text: str) -> None:
         if self.robot is None:
