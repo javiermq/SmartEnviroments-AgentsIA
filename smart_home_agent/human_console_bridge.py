@@ -161,17 +161,24 @@ class LocalTTS:
         self._voice = None
         self._lock = threading.Lock()
 
-    def synthesize_wav(self, text: str) -> bytes:
+    def _load_voice(self) -> None:
         if not self.model_path:
             raise RuntimeError("Falta --tts-model con una voz Piper .onnx")
+        try:
+            from piper import PiperVoice
+        except ImportError as exc:
+            raise RuntimeError("Falta piper-tts en este equipo") from exc
+        if self._voice is None:
+            self._voice = PiperVoice.load(self.model_path)
+            print(f"TTS listo: {self.model_path}")
+
+    def warm(self) -> None:
         with self._lock:
-            try:
-                from piper import PiperVoice
-            except ImportError as exc:
-                raise RuntimeError("Falta piper-tts en este equipo") from exc
-            if self._voice is None:
-                self._voice = PiperVoice.load(self.model_path)
-                print(f"TTS listo: {self.model_path}")
+            self._load_voice()
+
+    def synthesize_wav(self, text: str) -> bytes:
+        with self._lock:
+            self._load_voice()
             with NamedTemporaryFile(suffix=".wav", delete=False) as handle:
                 wav_path = Path(handle.name)
             try:
@@ -320,7 +327,10 @@ def main() -> None:
     parser.add_argument("--trace", action="store_true", help="Muestra solicitudes, tools y respuestas de Ollama")
     args = parser.parse_args()
     ollama_url = args.ollama_url if args.chat_mode == "ollama" else None
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), LocalTTS(args.tts_model), ollama_url, args.chat_mode == "automatic", args.trace))
+    tts = LocalTTS(args.tts_model)
+    if args.tts_model:
+        tts.warm()
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), tts, ollama_url, args.chat_mode == "automatic", args.trace))
     print(f"Human Console Bridge escuchando en http://{args.host}:{args.port}/api/chat")
     print(f"STT local disponible en http://{args.host}:{args.port}/stt ({args.stt_model}, {args.stt_device})")
     print(f"TTS local disponible en http://{args.host}:{args.port}/tts ({args.tts_model or 'sin voz configurada'})")
