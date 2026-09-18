@@ -1,5 +1,6 @@
 """Comprueba que el SDK puede reservar el micrófono y recibir una muestra."""
 
+
 import argparse
 import time
 
