@@ -172,7 +172,7 @@ class ReachyInterface(ConversationInterface):
             if speech:
                 speech_started = True
                 silence_deadline = time.monotonic() + 1.0
-            if speech_started:
+            if speech_started and sample is not None:
                 chunks.append(sample)
                 if time.monotonic() >= silence_deadline:
                     break
