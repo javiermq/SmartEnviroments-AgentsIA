@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import site
 import threading
 import time
 from datetime import datetime, timezone
@@ -14,6 +16,28 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+
+CUDA_DLL_DIRECTORIES: list[object] = []
+
+
+def configure_windows_cuda_dlls() -> None:
+    """Hace visibles las DLL instaladas por pip sin modificar PATH global."""
+    if os.name != "nt" or CUDA_DLL_DIRECTORIES:
+        return
+    paths: list[str] = []
+    for package_dir in site.getsitepackages():
+        root = Path(package_dir) / "nvidia"
+        for relative in ("cublas/bin", "cudnn/bin", "cuda_runtime/bin", "cuda_nvrtc/bin"):
+            dll_dir = root / relative
+            if dll_dir.is_dir():
+                path = str(dll_dir)
+                paths.append(path)
+                CUDA_DLL_DIRECTORIES.append(os.add_dll_directory(path))
+    # CTranslate2 carga CUDA dinámicamente; además de add_dll_directory necesita
+    # PATH para algunos builds de Windows. Solo afecta a este proceso Python.
+    if paths:
+        os.environ["PATH"] = os.pathsep.join(paths + [os.environ.get("PATH", "")])
 
 
 def assistant_message(answer: str) -> dict[str, Any]:
@@ -72,6 +96,7 @@ class LocalSTT:
     def transcribe_wav(self, wav_bytes: bytes) -> str:
         with self._lock:
             try:
+                configure_windows_cuda_dlls()
                 from faster_whisper import WhisperModel
             except ImportError as exc:
                 raise RuntimeError("Falta faster-whisper en el portátil. Ejecuta: pip install faster-whisper") from exc
