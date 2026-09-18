@@ -213,6 +213,7 @@ class ReachyInterface(ConversationInterface):
         tts: TextToSpeech | None = None,
         speech_rms_threshold: float = 0.02,
         speech_pre_roll_seconds: float = 0.35,
+        tts_leading_silence_seconds: float = 0.20,
     ):
         self.settings = settings
         stt_model = settings.stt_model_path or settings.stt_model
@@ -228,6 +229,7 @@ class ReachyInterface(ConversationInterface):
         self._doa_available = True
         self.speech_rms_threshold = speech_rms_threshold
         self.speech_pre_roll_seconds = max(0.0, speech_pre_roll_seconds)
+        self.tts_leading_silence_seconds = max(0.0, tts_leading_silence_seconds)
 
     async def start(self) -> None:
         try:
@@ -334,6 +336,12 @@ class ReachyInterface(ConversationInterface):
         try:
             clip = await self.tts.synthesize(text)
             samples, rate = self._resample_for_reachy(clip)
+            if self.tts_leading_silence_seconds:
+                import numpy as np
+
+                padding_frames = round(rate * self.tts_leading_silence_seconds)
+                padding = np.zeros((padding_frames,) + samples.shape[1:], dtype=np.float32)
+                samples = np.concatenate((padding, samples), axis=0)
             await asyncio.to_thread(self.robot.media.push_audio_sample, samples)
             await asyncio.sleep(len(samples) / rate)
         finally:
