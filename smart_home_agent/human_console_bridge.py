@@ -243,7 +243,7 @@ def forward_to_ollama(ollama_url: str, body: bytes, trace: bool) -> tuple[int, b
         raise RuntimeError(f"No se puede conectar con Ollama local ({ollama_url}): {exc}") from exc
 
 
-def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, ollama_url: str | None, automatic: bool, trace: bool) -> type[BaseHTTPRequestHandler]:
+def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, ollama_url: str | None, automatic: bool, echo: bool, trace: bool) -> type[BaseHTTPRequestHandler]:
     class BridgeHandler(BaseHTTPRequestHandler):
         server_version = "HumanConsoleBridge/1.0"
 
@@ -296,6 +296,17 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, ollama_url
                         print(f"AUTOMÁTICO → Reachy: {answer}")
                     status = HTTPStatus.OK
                     body = json.dumps(assistant_message(answer), ensure_ascii=False).encode("utf-8")
+                elif echo:
+                    payload = json.loads(body_in.decode("utf-8"))
+                    messages = payload.get("messages", []) if isinstance(payload, dict) else []
+                    user = next((message for message in reversed(messages) if message.get("role") == "user"), {})
+                    answer = str(user.get("content", "")).strip()
+                    if not answer:
+                        raise ValueError("/api/chat no recibió texto de usuario para eco")
+                    if trace:
+                        print(f"ECO → Reachy: {answer}")
+                    status = HTTPStatus.OK
+                    body = json.dumps(assistant_message(answer), ensure_ascii=False).encode("utf-8")
                 else:
                     payload = json.loads(body_in.decode("utf-8"))
                     if not isinstance(payload, dict):
@@ -322,7 +333,7 @@ def main() -> None:
     parser.add_argument("--stt-model", default="base", help="Modelo Faster-Whisper local del portátil")
     parser.add_argument("--stt-device", choices=["auto", "cuda", "cpu"], default="auto")
     parser.add_argument("--tts-model", default="", help="Ruta local de voz Piper .onnx para /tts")
-    parser.add_argument("--chat-mode", choices=["human", "ollama", "automatic"], default="human")
+    parser.add_argument("--chat-mode", choices=["human", "ollama", "automatic", "echo"], default="human")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/chat")
     parser.add_argument("--trace", action="store_true", help="Muestra solicitudes, tools y respuestas de Ollama")
     args = parser.parse_args()
@@ -330,11 +341,11 @@ def main() -> None:
     tts = LocalTTS(args.tts_model)
     if args.tts_model:
         tts.warm()
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), tts, ollama_url, args.chat_mode == "automatic", args.trace))
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), tts, ollama_url, args.chat_mode == "automatic", args.chat_mode == "echo", args.trace))
     print(f"Human Console Bridge escuchando en http://{args.host}:{args.port}/api/chat")
     print(f"STT local disponible en http://{args.host}:{args.port}/stt ({args.stt_model}, {args.stt_device})")
     print(f"TTS local disponible en http://{args.host}:{args.port}/tts ({args.tts_model or 'sin voz configurada'})")
-    chat_status = "Ollama local en " + ollama_url if ollama_url else ("respuesta automática aleatoria" if args.chat_mode == "automatic" else "respuesta humana por consola")
+    chat_status = "Ollama local en " + ollama_url if ollama_url else ({"automatic": "respuesta automática aleatoria", "echo": "eco del texto transcrito"}.get(args.chat_mode, "respuesta humana por consola"))
     print(f"Chat: {chat_status}")
     print("Ctrl+C para detenerlo. No lo expongas a Internet.")
     try:
