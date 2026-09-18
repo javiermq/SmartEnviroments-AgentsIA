@@ -1,5 +1,6 @@
 """Arranque único para interfaz de consola o Reachy Mini."""
 
+
 from __future__ import annotations
 
 import argparse
