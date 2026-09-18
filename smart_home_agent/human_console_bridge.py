@@ -12,6 +12,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 def assistant_message(answer: str) -> dict[str, Any]:
@@ -103,7 +105,19 @@ class LocalSTT:
                 wav_path.unlink(missing_ok=True)
 
 
-def make_handler(console: HumanConsole, stt: LocalSTT) -> type[BaseHTTPRequestHandler]:
+def forward_to_ollama(ollama_url: str, body: bytes) -> tuple[int, bytes]:
+    """Proxy local: Reachy nunca necesita acceder al puerto de Ollama."""
+    request = Request(ollama_url, data=body, method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urlopen(request, timeout=180) as response:
+            return response.status, response.read()
+    except HTTPError as exc:
+        return exc.code, exc.read()
+    except URLError as exc:
+        raise RuntimeError(f"No se puede conectar con Ollama local ({ollama_url}): {exc}") from exc
+
+
+def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None) -> type[BaseHTTPRequestHandler]:
     class BridgeHandler(BaseHTTPRequestHandler):
         server_version = "HumanConsoleBridge/1.0"
 
@@ -134,16 +148,21 @@ def make_handler(console: HumanConsole, stt: LocalSTT) -> type[BaseHTTPRequestHa
                     if not body_in.startswith(b"RIFF"):
                         raise ValueError("/stt espera audio WAV")
                     response: dict[str, Any] = {"text": stt.transcribe_wav(body_in)}
+                    status = HTTPStatus.OK
+                    body = json.dumps(response, ensure_ascii=False).encode("utf-8")
+                elif ollama_url:
+                    status, body = forward_to_ollama(ollama_url, body_in)
                 else:
                     payload = json.loads(body_in.decode("utf-8"))
                     if not isinstance(payload, dict):
                         raise ValueError("el cuerpo debe ser JSON objeto")
                     response = console.reply(payload)
+                    status = HTTPStatus.OK
+                    body = json.dumps(response, ensure_ascii=False).encode("utf-8")
             except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
                 self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
-            body = json.dumps(response, ensure_ascii=False).encode("utf-8")
-            self.send_response(HTTPStatus.OK)
+            self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -158,10 +177,14 @@ def main() -> None:
     parser.add_argument("--port", default=11435, type=int)
     parser.add_argument("--stt-model", default="base", help="Modelo Faster-Whisper local del portátil")
     parser.add_argument("--stt-device", choices=["auto", "cuda", "cpu"], default="auto")
+    parser.add_argument("--chat-mode", choices=["human", "ollama"], default="human")
+    parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/chat")
     args = parser.parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device)))
+    ollama_url = args.ollama_url if args.chat_mode == "ollama" else None
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), ollama_url))
     print(f"Human Console Bridge escuchando en http://{args.host}:{args.port}/api/chat")
     print(f"STT local disponible en http://{args.host}:{args.port}/stt ({args.stt_model}, {args.stt_device})")
+    print(f"Chat: {'Ollama local en ' + ollama_url if ollama_url else 'respuesta humana por consola'}")
     print("Ctrl+C para detenerlo. No lo expongas a Internet.")
     try:
         server.serve_forever()
