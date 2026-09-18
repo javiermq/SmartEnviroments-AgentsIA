@@ -205,7 +205,13 @@ class PiperTTS:
 class ReachyInterface(ConversationInterface):
     """Captura/audio/gestos Reachy. Nunca conversa con Ollama directamente."""
 
-    def __init__(self, settings: Settings, stt: SpeechToText | None = None, tts: TextToSpeech | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        stt: SpeechToText | None = None,
+        tts: TextToSpeech | None = None,
+        speech_rms_threshold: float = 0.02,
+    ):
         self.settings = settings
         stt_model = settings.stt_model_path or settings.stt_model
         remote_stt_url = os.getenv("REMOTE_STT_URL", "").strip()
@@ -218,6 +224,7 @@ class ReachyInterface(ConversationInterface):
         self.tts = tts or (RemoteTTS(remote_tts_url) if remote_tts_url else PiperTTS(settings.tts_model_path))
         self.robot = None
         self._doa_available = True
+        self.speech_rms_threshold = speech_rms_threshold
 
     async def start(self) -> None:
         try:
@@ -252,7 +259,7 @@ class ReachyInterface(ConversationInterface):
         chunks, speech_started = [], False
         deadline = time.monotonic() + self.settings.conversation_timeout
         silence_seconds = float(os.getenv("SPEECH_SILENCE_SECONDS", "0.5"))
-        rms_threshold = float(os.getenv("SPEECH_RMS_THRESHOLD", "0.015"))
+        rms_threshold = self.speech_rms_threshold
         silence_deadline = deadline
         while time.monotonic() < deadline:
             sample = await asyncio.to_thread(self.robot.media.get_audio_sample)
