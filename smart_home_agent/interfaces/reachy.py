@@ -283,6 +283,11 @@ class ReachyInterface(ConversationInterface):
                     pre_roll.clear()
                     if not had_pre_roll and sample is not None:
                         chunks.append(sample)
+                elif sample is not None:
+                    # El bloque que activa el turno ya va incluido en el pre-roll,
+                    # pero los bloques de voz posteriores también deben conservarse.
+                    # Si se omiten, al STT solo le llegan silencios y fragmentos.
+                    chunks.append(sample)
                 speech_started = True
                 silence_deadline = time.monotonic() + silence_seconds
             elif speech_started and sample is not None:
