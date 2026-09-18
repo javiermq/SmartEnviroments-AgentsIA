@@ -379,6 +379,13 @@ class ReachyInterface(ConversationInterface):
             self._start_gesture(self._speaking_gesture, "inicio de habla")
 
     async def on_idle(self) -> None:
+        # Al finalizar el audio se elimina cualquier offset que haya dejado el
+        # wobbler; de lo contrario la cabeza puede quedarse inclinada entre turnos.
+        if self.robot is not None:
+            try:
+                await asyncio.to_thread(self.robot.disable_wobbling)
+            except Exception as exc:
+                LOGGER.warning("No se pudo desactivar wobbling al volver a reposo: %s", exc)
         if self.expressive_motion:
             self._start_gesture(self._idle_gesture, "vuelta a reposo")
         LOGGER.debug("Reachy en espera")
@@ -402,9 +409,14 @@ class ReachyInterface(ConversationInterface):
 
     def _idle_gesture(self) -> None:
         import numpy as np
+        from reachy_mini.utils import create_head_pose
 
         self.robot.goto_target(
-            antennas=np.deg2rad([0, 0]), duration=0.45, method="minjerk", body_yaw=None,
+            head=create_head_pose(),
+            antennas=np.deg2rad([0, 0]),
+            body_yaw=0.0,
+            duration=0.8,
+            method="minjerk",
         )
 
     async def close(self) -> None:
