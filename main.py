@@ -30,7 +30,11 @@ async def run(args: argparse.Namespace) -> None:
         interface = ConsoleInterface()
     elif interface_name == "reachy":
         from smart_home_agent.interfaces.reachy import ReachyInterface
-        interface = ReachyInterface(settings, speech_rms_threshold=args.speech_rms_threshold)
+        interface = ReachyInterface(
+            settings,
+            speech_rms_threshold=args.speech_rms_threshold,
+            speech_pre_roll_seconds=args.speech_pre_roll_seconds,
+        )
     else:
         raise ValueError("--interface debe ser console o reachy")
 
@@ -67,6 +71,10 @@ def main() -> None:
     parser.add_argument(
         "--speech-rms-threshold", type=float, default=0.02,
         help="Umbral RMS usado si el sensor DoA de Reachy falla (por defecto: 0.02).",
+    )
+    parser.add_argument(
+        "--speech-pre-roll-seconds", type=float, default=0.35,
+        help="Audio previo a la detección de voz que se conserva (por defecto: 0.35 s).",
     )
     parser.add_argument("--trace", action="store_true", help="Muestra llamadas a herramientas y resultados.")
     args = parser.parse_args()

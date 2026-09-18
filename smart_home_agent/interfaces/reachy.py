@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import time
 import wave
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -211,6 +212,7 @@ class ReachyInterface(ConversationInterface):
         stt: SpeechToText | None = None,
         tts: TextToSpeech | None = None,
         speech_rms_threshold: float = 0.02,
+        speech_pre_roll_seconds: float = 0.35,
     ):
         self.settings = settings
         stt_model = settings.stt_model_path or settings.stt_model
@@ -225,6 +227,7 @@ class ReachyInterface(ConversationInterface):
         self.robot = None
         self._doa_available = True
         self.speech_rms_threshold = speech_rms_threshold
+        self.speech_pre_roll_seconds = max(0.0, speech_pre_roll_seconds)
 
     async def start(self) -> None:
         try:
@@ -257,6 +260,9 @@ class ReachyInterface(ConversationInterface):
         except ImportError as exc:
             raise AudioError("Falta numpy en el entorno de Reachy.") from exc
         chunks, speech_started = [], False
+        pre_roll: deque[object] = deque()
+        pre_roll_frames = 0
+        max_pre_roll_frames = round(self.robot.media.get_input_audio_samplerate() * self.speech_pre_roll_seconds)
         deadline = time.monotonic() + self.settings.conversation_timeout
         silence_seconds = float(os.getenv("SPEECH_SILENCE_SECONDS", "0.5"))
         rms_threshold = self.speech_rms_threshold
@@ -264,10 +270,22 @@ class ReachyInterface(ConversationInterface):
         while time.monotonic() < deadline:
             sample = await asyncio.to_thread(self.robot.media.get_audio_sample)
             speech = await asyncio.to_thread(self._speech_detected, sample, rms_threshold)
+            if not speech_started and sample is not None and max_pre_roll_frames:
+                buffered = np.asarray(sample, dtype=np.float32).copy()
+                pre_roll.append(buffered)
+                pre_roll_frames += len(buffered)
+                while pre_roll and pre_roll_frames > max_pre_roll_frames:
+                    pre_roll_frames -= len(pre_roll.popleft())
             if speech:
+                if not speech_started:
+                    had_pre_roll = bool(pre_roll)
+                    chunks.extend(pre_roll)
+                    pre_roll.clear()
+                    if not had_pre_roll and sample is not None:
+                        chunks.append(sample)
                 speech_started = True
                 silence_deadline = time.monotonic() + silence_seconds
-            if speech_started and sample is not None:
+            elif speech_started and sample is not None:
                 chunks.append(sample)
                 if time.monotonic() >= silence_deadline:
                     break
