@@ -42,6 +42,30 @@ AUTOMATIC_RESPONSES = (
     "Puedes continuar cuando quieras.",
     "Prueba completada: respuesta local generada.",
 )
+SAVE_SIZE_SAMPLES = 100
+
+
+class ReceivedWavRing:
+    """Conserva los últimos WAV recibidos en un anillo de tamaño fijo."""
+
+    def __init__(self, directory: Path, size: int = SAVE_SIZE_SAMPLES) -> None:
+        if size < 1:
+            raise ValueError("El tamaño del anillo debe ser al menos 1")
+        self.directory = directory
+        self.size = size
+        self._next_slot = 0
+        self._lock = threading.Lock()
+        self.directory.mkdir(parents=True, exist_ok=True)
+
+    def save(self, wav_bytes: bytes) -> Path:
+        """Guarda de forma atómica y reutiliza reachy_000.wav al completar el anillo."""
+        with self._lock:
+            path = self.directory / f"reachy_{self._next_slot:03d}.wav"
+            temporary = path.with_suffix(".wav.part")
+            temporary.write_bytes(wav_bytes)
+            temporary.replace(path)
+            self._next_slot = (self._next_slot + 1) % self.size
+            return path
 
 
 def configure_windows_cuda_dlls() -> None:
@@ -243,7 +267,7 @@ def forward_to_ollama(ollama_url: str, body: bytes, trace: bool) -> tuple[int, b
         raise RuntimeError(f"No se puede conectar con Ollama local ({ollama_url}): {exc}") from exc
 
 
-def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, ollama_url: str | None, automatic: bool, echo: bool, trace: bool) -> type[BaseHTTPRequestHandler]:
+def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_wavs: ReceivedWavRing, ollama_url: str | None, automatic: bool, echo: bool, trace: bool) -> type[BaseHTTPRequestHandler]:
     class BridgeHandler(BaseHTTPRequestHandler):
         server_version = "HumanConsoleBridge/1.0"
 
@@ -274,6 +298,8 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, ollama_url
                 if self.path == "/stt":
                     if not body_in.startswith(b"RIFF"):
                         raise ValueError("/stt espera audio WAV")
+                    saved_path = received_wavs.save(body_in)
+                    print(f"WAV de Reachy guardado: {saved_path}")
                     response: dict[str, Any] = {"text": stt.transcribe_wav(body_in)}
                     status = HTTPStatus.OK
                     body = json.dumps(response, ensure_ascii=False).encode("utf-8")
@@ -335,15 +361,18 @@ def main() -> None:
     parser.add_argument("--tts-model", default="", help="Ruta local de voz Piper .onnx para /tts")
     parser.add_argument("--chat-mode", choices=["human", "ollama", "automatic", "echo"], default="human")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/chat")
+    parser.add_argument("--save-dir", default="temp_data", help="Directorio del anillo de 100 WAV de entrada")
     parser.add_argument("--trace", action="store_true", help="Muestra solicitudes, tools y respuestas de Ollama")
     args = parser.parse_args()
     ollama_url = args.ollama_url if args.chat_mode == "ollama" else None
     tts = LocalTTS(args.tts_model)
     if args.tts_model:
         tts.warm()
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), tts, ollama_url, args.chat_mode == "automatic", args.chat_mode == "echo", args.trace))
+    received_wavs = ReceivedWavRing(Path(args.save_dir), SAVE_SIZE_SAMPLES)
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), tts, received_wavs, ollama_url, args.chat_mode == "automatic", args.chat_mode == "echo", args.trace))
     print(f"Human Console Bridge escuchando en http://{args.host}:{args.port}/api/chat")
     print(f"STT local disponible en http://{args.host}:{args.port}/stt ({args.stt_model}, {args.stt_device})")
+    print(f"WAV recibidos: {received_wavs.directory.resolve()} (anillo de {SAVE_SIZE_SAMPLES})")
     print(f"TTS local disponible en http://{args.host}:{args.port}/tts ({args.tts_model or 'sin voz configurada'})")
     chat_status = "Ollama local en " + ollama_url if ollama_url else ({"automatic": "respuesta automática aleatoria", "echo": "eco del texto transcrito"}.get(args.chat_mode, "respuesta humana por consola"))
     print(f"Chat: {chat_status}")
