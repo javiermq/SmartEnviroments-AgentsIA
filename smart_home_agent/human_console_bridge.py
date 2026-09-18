@@ -8,6 +8,7 @@ import os
 import site
 import threading
 import time
+import wave
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -152,6 +153,38 @@ class LocalSTT:
                 wav_path.unlink(missing_ok=True)
 
 
+class LocalTTS:
+    """Piper persistente en el servidor/portátil; evita cargar la voz en Reachy."""
+
+    def __init__(self, model_path: str) -> None:
+        self.model_path = model_path
+        self._voice = None
+        self._lock = threading.Lock()
+
+    def synthesize_wav(self, text: str) -> bytes:
+        if not self.model_path:
+            raise RuntimeError("Falta --tts-model con una voz Piper .onnx")
+        with self._lock:
+            try:
+                from piper import PiperVoice
+            except ImportError as exc:
+                raise RuntimeError("Falta piper-tts en este equipo") from exc
+            if self._voice is None:
+                self._voice = PiperVoice.load(self.model_path)
+                print(f"TTS listo: {self.model_path}")
+            with NamedTemporaryFile(suffix=".wav", delete=False) as handle:
+                wav_path = Path(handle.name)
+            try:
+                started = time.monotonic()
+                with wave.open(str(wav_path), "wb") as wav_file:
+                    self._voice.synthesize_wav(text, wav_file)
+                wav_bytes = wav_path.read_bytes()
+                print(f"TTS ({time.monotonic() - started:.2f} s): {text}")
+                return wav_bytes
+            finally:
+                wav_path.unlink(missing_ok=True)
+
+
 def _trace_chat_request(body: bytes) -> None:
     try:
         payload = json.loads(body.decode("utf-8"))
@@ -203,7 +236,7 @@ def forward_to_ollama(ollama_url: str, body: bytes, trace: bool) -> tuple[int, b
         raise RuntimeError(f"No se puede conectar con Ollama local ({ollama_url}): {exc}") from exc
 
 
-def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None, automatic: bool, trace: bool) -> type[BaseHTTPRequestHandler]:
+def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, ollama_url: str | None, automatic: bool, trace: bool) -> type[BaseHTTPRequestHandler]:
     class BridgeHandler(BaseHTTPRequestHandler):
         server_version = "HumanConsoleBridge/1.0"
 
@@ -222,7 +255,7 @@ def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None, a
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path not in ("/api/chat", "/stt"):
+            if self.path not in ("/api/chat", "/stt", "/tts"):
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             try:
@@ -230,12 +263,21 @@ def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None, a
                 if not 0 < length <= 20_000_000:
                     raise ValueError("Content-Length inválido")
                 body_in = self.rfile.read(length)
+                content_type = "application/json; charset=utf-8"
                 if self.path == "/stt":
                     if not body_in.startswith(b"RIFF"):
                         raise ValueError("/stt espera audio WAV")
                     response: dict[str, Any] = {"text": stt.transcribe_wav(body_in)}
                     status = HTTPStatus.OK
                     body = json.dumps(response, ensure_ascii=False).encode("utf-8")
+                elif self.path == "/tts":
+                    payload = json.loads(body_in.decode("utf-8"))
+                    text = payload.get("text") if isinstance(payload, dict) else None
+                    if not isinstance(text, str) or not text.strip():
+                        raise ValueError("/tts espera JSON con texto no vacío")
+                    status = HTTPStatus.OK
+                    body = tts.synthesize_wav(text.strip())
+                    content_type = "audio/wav"
                 elif ollama_url:
                     status, body = forward_to_ollama(ollama_url, body_in, trace)
                 elif automatic:
@@ -258,7 +300,7 @@ def make_handler(console: HumanConsole, stt: LocalSTT, ollama_url: str | None, a
                 self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
             self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -272,14 +314,16 @@ def main() -> None:
     parser.add_argument("--port", default=11435, type=int)
     parser.add_argument("--stt-model", default="base", help="Modelo Faster-Whisper local del portátil")
     parser.add_argument("--stt-device", choices=["auto", "cuda", "cpu"], default="auto")
+    parser.add_argument("--tts-model", default="", help="Ruta local de voz Piper .onnx para /tts")
     parser.add_argument("--chat-mode", choices=["human", "ollama", "automatic"], default="human")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/chat")
     parser.add_argument("--trace", action="store_true", help="Muestra solicitudes, tools y respuestas de Ollama")
     args = parser.parse_args()
     ollama_url = args.ollama_url if args.chat_mode == "ollama" else None
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), ollama_url, args.chat_mode == "automatic", args.trace))
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), LocalTTS(args.tts_model), ollama_url, args.chat_mode == "automatic", args.trace))
     print(f"Human Console Bridge escuchando en http://{args.host}:{args.port}/api/chat")
     print(f"STT local disponible en http://{args.host}:{args.port}/stt ({args.stt_model}, {args.stt_device})")
+    print(f"TTS local disponible en http://{args.host}:{args.port}/tts ({args.tts_model or 'sin voz configurada'})")
     chat_status = "Ollama local en " + ollama_url if ollama_url else ("respuesta automática aleatoria" if args.chat_mode == "automatic" else "respuesta humana por consola")
     print(f"Chat: {chat_status}")
     print("Ctrl+C para detenerlo. No lo expongas a Internet.")

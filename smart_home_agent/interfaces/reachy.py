@@ -127,6 +127,41 @@ class RemoteSTT:
         return text
 
 
+class RemoteTTS:
+    """Obtiene WAV desde el TTS local del servidor; Reachy solo reproduce."""
+
+    def __init__(self, endpoint: str) -> None:
+        self.endpoint = endpoint
+
+    async def synthesize(self, text: str) -> AudioClip:
+        return await asyncio.to_thread(self._synthesize_sync, text)
+
+    def _synthesize_sync(self, text: str) -> AudioClip:
+        try:
+            import numpy as np
+        except ImportError as exc:
+            raise AudioError("Falta numpy en el entorno de Reachy.") from exc
+        request = Request(
+            self.endpoint, data=json.dumps({"text": text}).encode("utf-8"), method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urlopen(request, timeout=60) as response:
+                wav_bytes = response.read()
+        except (HTTPError, URLError, TimeoutError) as exc:
+            raise AudioError(f"No se pudo usar el TTS remoto {self.endpoint}: {exc}") from exc
+        try:
+            with wave.open(io.BytesIO(wav_bytes), "rb") as wav:
+                if wav.getsampwidth() != 2:
+                    raise AudioError("El TTS remoto devolvió WAV no PCM de 16 bits.")
+                samples = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
+                if wav.getnchannels() > 1:
+                    samples = samples.reshape(-1, wav.getnchannels()).mean(axis=1)
+                return AudioClip(samples=samples[:, None], sample_rate=wav.getframerate())
+        except (wave.Error, EOFError) as exc:
+            raise AudioError("El TTS remoto no devolvió un WAV válido.") from exc
+
+
 class PiperTTS:
     """Adaptador Piper CLI: genera WAV; Reachy reproduce por su SDK oficial."""
 
@@ -174,12 +209,13 @@ class ReachyInterface(ConversationInterface):
         self.settings = settings
         stt_model = settings.stt_model_path or settings.stt_model
         remote_stt_url = os.getenv("REMOTE_STT_URL", "").strip()
+        remote_tts_url = os.getenv("REMOTE_TTS_URL", "").strip()
         self.stt = stt or (
             RemoteSTT(remote_stt_url)
             if remote_stt_url
             else FasterWhisperSTT(stt_model, settings.stt_language, settings.stt_device, settings.stt_compute_type)
         )
-        self.tts = tts or PiperTTS(settings.tts_model_path)
+        self.tts = tts or (RemoteTTS(remote_tts_url) if remote_tts_url else PiperTTS(settings.tts_model_path))
         self.robot = None
 
     async def start(self) -> None:
@@ -214,13 +250,14 @@ class ReachyInterface(ConversationInterface):
             raise AudioError("Falta numpy en el entorno de Reachy.") from exc
         chunks, speech_started = [], False
         deadline = time.monotonic() + self.settings.conversation_timeout
+        silence_seconds = float(os.getenv("SPEECH_SILENCE_SECONDS", "0.5"))
         silence_deadline = deadline
         while time.monotonic() < deadline:
             sample = await asyncio.to_thread(self.robot.media.get_audio_sample)
             _, speech = await asyncio.to_thread(self.robot.media.get_DoA)
             if speech:
                 speech_started = True
-                silence_deadline = time.monotonic() + 1.0
+                silence_deadline = time.monotonic() + silence_seconds
             if speech_started and sample is not None:
                 chunks.append(sample)
                 if time.monotonic() >= silence_deadline:
