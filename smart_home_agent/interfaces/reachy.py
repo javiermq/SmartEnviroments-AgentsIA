@@ -7,7 +7,10 @@ Reachy. El uso de media se limita a métodos documentados del SDK oficial.
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import logging
+import os
 import subprocess
 import tempfile
 import time
@@ -15,6 +18,8 @@ import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from ..config import Settings
 from .base import ConversationInterface, InterfaceState
@@ -83,6 +88,45 @@ class FasterWhisperSTT:
             wav_path.unlink(missing_ok=True)
 
 
+class RemoteSTT:
+    """Envía solo el turno WAV al STT local del portátil, por red privada."""
+
+    def __init__(self, endpoint: str) -> None:
+        self.endpoint = endpoint
+
+    async def transcribe(self, audio: AudioClip) -> str:
+        return await asyncio.to_thread(self._transcribe_sync, audio)
+
+    def _transcribe_sync(self, audio: AudioClip) -> str:
+        try:
+            import numpy as np
+        except ImportError as exc:
+            raise AudioError("Falta numpy en el entorno de Reachy.") from exc
+        samples = np.asarray(audio.samples, dtype=np.float32)
+        if samples.ndim == 2:
+            samples = samples.mean(axis=1)
+        pcm = (np.clip(samples, -1, 1) * 32767).astype("<i2")
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(audio.sample_rate)
+            wav.writeframes(pcm.tobytes())
+        request = Request(
+            self.endpoint, data=buffer.getvalue(), method="POST",
+            headers={"Content-Type": "audio/wav"},
+        )
+        try:
+            with urlopen(request, timeout=60) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError) as exc:
+            raise AudioError(f"No se pudo usar el STT remoto {self.endpoint}: {exc}") from exc
+        text = payload.get("text")
+        if not isinstance(text, str):
+            raise AudioError(f"Respuesta inválida del STT remoto: {payload}")
+        return text
+
+
 class PiperTTS:
     """Adaptador Piper CLI: genera WAV; Reachy reproduce por su SDK oficial."""
 
@@ -129,7 +173,12 @@ class ReachyInterface(ConversationInterface):
     def __init__(self, settings: Settings, stt: SpeechToText | None = None, tts: TextToSpeech | None = None):
         self.settings = settings
         stt_model = settings.stt_model_path or settings.stt_model
-        self.stt = stt or FasterWhisperSTT(stt_model, settings.stt_language, settings.stt_device, settings.stt_compute_type)
+        remote_stt_url = os.getenv("REMOTE_STT_URL", "").strip()
+        self.stt = stt or (
+            RemoteSTT(remote_stt_url)
+            if remote_stt_url
+            else FasterWhisperSTT(stt_model, settings.stt_language, settings.stt_device, settings.stt_compute_type)
+        )
         self.tts = tts or PiperTTS(settings.tts_model_path)
         self.robot = None
 

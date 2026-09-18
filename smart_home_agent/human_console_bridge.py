@@ -5,9 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import threading
+import time
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 
@@ -55,7 +58,52 @@ class HumanConsole:
                 print("Escribe una respuesta no vacía.")
 
 
-def make_handler(console: HumanConsole) -> type[BaseHTTPRequestHandler]:
+class LocalSTT:
+    """STT local del portátil, cargado solo al recibir la primera voz."""
+
+    def __init__(self, model_name: str, device: str) -> None:
+        self.model_name = model_name
+        self.device = device
+        self._model = None
+        self._lock = threading.Lock()
+
+    def transcribe_wav(self, wav_bytes: bytes) -> str:
+        with self._lock:
+            try:
+                from faster_whisper import WhisperModel
+            except ImportError as exc:
+                raise RuntimeError("Falta faster-whisper en el portátil. Ejecuta: pip install faster-whisper") from exc
+            if self._model is None:
+                # auto prioriza CUDA, pero mantiene la prueba utilizable si el portátil no
+                # tiene las bibliotecas CUDA/CTranslate2 disponibles.
+                if self.device == "auto":
+                    try:
+                        self._model = WhisperModel(self.model_name, device="cuda", compute_type="float16")
+                        print(f"STT listo: {self.model_name} en CUDA")
+                    except Exception as exc:
+                        print(f"CUDA no disponible para STT ({exc}); usando CPU int8.")
+                        self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+                else:
+                    compute_type = "float16" if self.device == "cuda" else "int8"
+                    self._model = WhisperModel(self.model_name, device=self.device, compute_type=compute_type)
+                    print(f"STT listo: {self.model_name} en {self.device}")
+            with NamedTemporaryFile(suffix=".wav", delete=False) as handle:
+                wav_path = Path(handle.name)
+                handle.write(wav_bytes)
+            try:
+                started = time.monotonic()
+                segments, _ = self._model.transcribe(
+                    str(wav_path), language="es", beam_size=1,
+                    condition_on_previous_text=False, vad_filter=True,
+                )
+                text = " ".join(segment.text.strip() for segment in segments).strip()
+                print(f"STT ({time.monotonic() - started:.2f} s): {text or '[sin texto]'}")
+                return text
+            finally:
+                wav_path.unlink(missing_ok=True)
+
+
+def make_handler(console: HumanConsole, stt: LocalSTT) -> type[BaseHTTPRequestHandler]:
     class BridgeHandler(BaseHTTPRequestHandler):
         server_version = "HumanConsoleBridge/1.0"
 
@@ -74,18 +122,24 @@ def make_handler(console: HumanConsole) -> type[BaseHTTPRequestHandler]:
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path != "/api/chat":
+            if self.path not in ("/api/chat", "/stt"):
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 1_000_000:
+                if not 0 < length <= 20_000_000:
                     raise ValueError("Content-Length inválido")
-                payload = json.loads(self.rfile.read(length).decode("utf-8"))
-                if not isinstance(payload, dict):
-                    raise ValueError("el cuerpo debe ser JSON objeto")
-                response = console.reply(payload)
-            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                body_in = self.rfile.read(length)
+                if self.path == "/stt":
+                    if not body_in.startswith(b"RIFF"):
+                        raise ValueError("/stt espera audio WAV")
+                    response: dict[str, Any] = {"text": stt.transcribe_wav(body_in)}
+                else:
+                    payload = json.loads(body_in.decode("utf-8"))
+                    if not isinstance(payload, dict):
+                        raise ValueError("el cuerpo debe ser JSON objeto")
+                    response = console.reply(payload)
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
                 self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
             body = json.dumps(response, ensure_ascii=False).encode("utf-8")
@@ -102,9 +156,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="LLM humano compatible con Ollama para pruebas de Reachy")
     parser.add_argument("--host", default="127.0.0.1", help="127.0.0.1 (solo portátil) o 0.0.0.0 (Reachy en LAN)")
     parser.add_argument("--port", default=11435, type=int)
+    parser.add_argument("--stt-model", default="base", help="Modelo Faster-Whisper local del portátil")
+    parser.add_argument("--stt-device", choices=["auto", "cuda", "cpu"], default="auto")
     args = parser.parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole()))
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device)))
     print(f"Human Console Bridge escuchando en http://{args.host}:{args.port}/api/chat")
+    print(f"STT local disponible en http://{args.host}:{args.port}/stt ({args.stt_model}, {args.stt_device})")
     print("Ctrl+C para detenerlo. No lo expongas a Internet.")
     try:
         server.serve_forever()
