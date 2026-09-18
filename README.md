@@ -34,6 +34,11 @@ Mantén el contexto en 8192 tokens al principio. No es aconsejable escoger un
 modelo de 8B o mayor como primera configuración si se desea que quede margen de
 VRAM para el contexto y el sistema.
 
+El `qwen3:4b` descargado ya usa cuantización `Q4_K_M`; bajar a Q2/Q3 externo
+empeora notablemente las llamadas de herramienta. Para priorizar velocidad, usa
+el perfil `qwen3:1.7b-fast` que se prepara con `scripts/setup_fast_qwen.ps1`.
+Mantén el 4B para las pruebas de herramientas más exigentes.
+
 1. Instala Python 3.11+ y Ollama para Windows.
 2. Ejecuta `ollama pull qwen3:4b`.
 3. Instala y configura OpenClaw siguiendo su asistente de instalación.
@@ -102,3 +107,19 @@ python main.py --interface console --t0 "2026-09-16T18:56:00+02:00" --trace
 La interfaz Reachy Mini se documenta en
 [`docs/REACHY_DEPLOYMENT.md`](docs/REACHY_DEPLOYMENT.md). No se importa su SDK
 cuando se usa el modo consola.
+
+## Puente humano para probar Reachy sin LLM
+
+En el portátil, inicia un servidor que habla el protocolo de Ollama pero deja
+que una persona escriba cada respuesta:
+
+```powershell
+python smart_home_agent/human_console_bridge.py --host 0.0.0.0 --port 11435
+```
+
+En el `.env` de Reachy establece `OLLAMA_URL=http://IP_DEL_PORTATIL:11435/api/chat`
+y `OLLAMA_MODEL=human-console`. Reachy sigue usando el mismo backend: envía el
+texto al puente y pronuncia literalmente lo que se escriba en `HUMANO>`. Desde
+esa consola, `/tool {JSON}` simula una llamada a `query_aggregation`; el
+resultado aparecerá en la siguiente petición y podrás redactar la respuesta
+final. Para probar solo en el portátil, deja el host por defecto `127.0.0.1`.
