@@ -3,6 +3,24 @@
 Este prototipo permite que un agente conversacional consulte dinámicamente el
 TSV simulado, empezando por las señales del reloj.
 
+Los datos viven en `sensor_context_data/`, con sensores y actividades de los días
+15 y 16 de septiembre de 2026. El perfil editable está en
+[`user_context.json`](sensor_context_data/user_context.json). Cada turno incorpora
+el perfil, los sensores en `--t0`, la actividad actual y las últimas 12 horas de
+actividades. Véase [formato y semántica temporal](sensor_context_data/README.md).
+
+La personalidad cercana, con humor suave y acompañamiento opcional, se edita en
+[`agent_style.txt`](sensor_context_data/agent_style.txt). Se recarga en cada turno.
+Para conversar con Ollama local y Qwen3 4B, desde la raíz del proyecto:
+
+```powershell
+python -u -m smart_home_agent.conversation_demo --t0 "2026-09-16T18:56:00+02:00"
+```
+
+Escribe `salir` para terminar. Esta demo usa Ollama en `127.0.0.1:11434` y conserva
+el historial de diálogo durante la sesión. La primera respuesta puede tardar por
+la carga del modelo y el procesamiento del contexto.
+
 ## API de agregación
 
 La función Python `query_aggregation(sensor_type, time_init, time_end, aggregation)`
@@ -116,15 +134,15 @@ Este es el modo de validación recomendado antes de añadir el LLM: Reachy
 captura el audio, el portátil transcribe con Faster-Whisper `turbo`, devuelve
 el mismo texto y lo sintetiza con Piper. No utiliza Ollama ni el servidor.
 
-En el portátil Windows, con una voz Piper ya descargada en `$voice`, inicia el
-bridge:
+En el portátil Windows, con la voz Piper `es_ES-davefx-medium` descargada en
+`C:\Users\Javier\.piper-voices`, inicia el bridge:
 
 ```powershell
 & "C:\Users\Javier\AppData\Local\Programs\Python\Python311\python.exe" -u `
   smart_home_agent\human_console_bridge.py `
   --host 0.0.0.0 --port 11435 `
   --stt-model turbo --stt-device auto `
-  --tts-model "$voice" `
+  --tts-model "C:\Users\Javier\.piper-voices\es_ES-davefx-medium.onnx" `
   --chat-mode echo --trace
 ```
 
@@ -145,7 +163,13 @@ python main.py \
   --trace \
   --speech-rms-threshold 0.03 \
   --expressive-motion
+  
+  
+/venvs/apps_venv/bin/python -u main.py   --interface reachy   --t0 "2026-09-16T18:56:00+02:00"   --trace   --speech-rms-threshold 0.03   --expressive-motion  
 ```
+
+
+
 
 El reproductor de Reachy añade por defecto 0,20 segundos de silencio antes de
 la respuesta para no perder la primera sílaba. Si fuese necesario, puede

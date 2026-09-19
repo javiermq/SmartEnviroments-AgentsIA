@@ -10,6 +10,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from .sensor_queries import query_aggregation
+from .context import system_prompt
 
 TraceCallback = Callable[[str, dict[str, Any]], None]
 
@@ -37,6 +38,7 @@ class ConversationBackend:
     """Qwen/Ollama y sus herramientas, sin detalles de consola o robot."""
 
     def __init__(self, t0: str, model: str = "qwen3:4b", ollama_url: str = "http://127.0.0.1:11434/api/chat"):
+        self.t0 = t0
         self.model = model
         self.ollama_url = ollama_url
         self.messages: list[dict[str, Any]] = [{"role": "system", "content": self._system_prompt(t0)}]
@@ -44,15 +46,10 @@ class ConversationBackend:
 
     @staticmethod
     def _system_prompt(t0: str) -> str:
-        return f"""Eres un asistente doméstico conversacional. La hora de referencia es {t0}.
-Responde en español y sé breve. Cuando el usuario pregunte por pasos, distancia,
-sueño, descanso o actividad, DEBES llamar a query_aggregation antes de contestar.
-Solo existen watch.steps, watch.distance_m y watch.sleep. Si no se indica un
-intervalo, usa 00:00 como inicio y la hora de referencia como fin. Para la
-calidad del sueño, aclara que solo hay una estimación de duración y no una
-medición clínica. No inventes datos ni expliques razonamiento interno."""
+        return system_prompt(t0)
 
     def respond(self, user_text: str, trace: TraceCallback | None = None) -> str:
+        self.messages[0]["content"] = self._system_prompt(self.t0)
         self.last_gesture = None
         self.messages.append({"role": "user", "content": user_text})
         for round_number in range(1, 5):
@@ -75,7 +72,7 @@ medición clínica. No inventes datos ni expliques razonamiento interno."""
                 if trace:
                     trace("tool_call", {"name": name, "arguments": arguments})
                 try:
-                    result = query_aggregation(**arguments)
+                    result = query_aggregation(**arguments, reference_day=self.t0[:10])
                     content = json.dumps(result, ensure_ascii=False)
                     if trace:
                         trace("tool_result", result)
@@ -87,7 +84,7 @@ medición clínica. No inventes datos ni expliques razonamiento interno."""
         return "Se alcanzó el límite de llamadas de herramienta para este turno."
 
     def _request_ollama(self) -> dict[str, Any]:
-        payload = {"model": self.model, "messages": self.messages, "tools": [TOOL_SCHEMA], "stream": False, "think": False, "options": {"num_ctx": 8192}}
+        payload = {"model": self.model, "messages": self.messages, "tools": [TOOL_SCHEMA], "stream": False, "think": True, "options": {"num_ctx": 8192}}
         request = Request(self.ollama_url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
         try:
             with urlopen(request, timeout=180) as response:

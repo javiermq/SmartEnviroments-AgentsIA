@@ -12,8 +12,10 @@ from urllib.request import Request, urlopen
 
 try:
     from .sensor_queries import query_aggregation
+    from .context import system_prompt
 except ImportError:  # Ejecución directa: python smart_home_agent/conversation_demo.py
     from sensor_queries import query_aggregation
+    from context import system_prompt
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 MODEL = "qwen3:4b"
@@ -50,7 +52,7 @@ def _request_ollama(messages: list[dict]) -> dict:
         "messages": messages,
         "tools": [TOOL_SCHEMA],
         "stream": False,
-        "think": False,
+        "think": True,
         "options": {"num_ctx": 8192},
     }
     request = Request(
@@ -64,13 +66,7 @@ def _request_ollama(messages: list[dict]) -> dict:
 
 
 def _system_prompt(t0: str) -> str:
-    return f"""Eres un asistente doméstico conversacional. La hora de referencia es {t0}.
-Responde en español y sé breve. Cuando el usuario pregunte por pasos, distancia,
-sueño, descanso o actividad, DEBES llamar a query_aggregation antes de contestar.
-Solo existen watch.steps, watch.distance_m y watch.sleep. Si no se indica un
-intervalo, usa 00:00 como inicio y la hora de referencia como fin. Para la
-calidad del sueño, aclara que solo hay una estimación de duración y no una
-medición clínica. No inventes datos ni expliques razonamiento interno."""
+    return system_prompt(t0)
 
 
 def _visible_answer(content: str) -> str:
@@ -87,7 +83,8 @@ def _visible_answer(content: str) -> str:
     return content.strip()
 
 
-def _run_turn(messages: list[dict], user_text: str) -> None:
+def _run_turn(messages: list[dict], user_text: str, t0: str) -> None:
+    messages[0]["content"] = _system_prompt(t0)
     messages.append({"role": "user", "content": user_text})
     print(f"\nUSUARIO  > {user_text}")
 
@@ -111,7 +108,7 @@ def _run_turn(messages: list[dict], user_text: str) -> None:
                 arguments = function.get("arguments", {})
                 print(f"TRAZA    > {name}({json.dumps(arguments, ensure_ascii=False)})")
                 try:
-                    result = query_aggregation(**arguments)
+                    result = query_aggregation(**arguments, reference_day=t0[:10])
                     tool_content = json.dumps(result, ensure_ascii=False)
                     print(f"RESULTADO> {tool_content}")
                 except (ValueError, FileNotFoundError, TypeError) as exc:
@@ -142,10 +139,10 @@ def main() -> None:
 
     messages = [{"role": "system", "content": _system_prompt(args.t0)}]
     print(f"Sesión iniciada en t0={args.t0}. Modelo: {MODEL}")
-    print("La traza muestra llamadas y resultados; no revela razonamiento interno oculto.")
+    print("Razonamiento de Qwen activado. La traza muestra herramientas y resultados; la consola muestra la respuesta final.")
 
     if args.question:
-        _run_turn(messages, args.question)
+        _run_turn(messages, args.question, args.t0)
         return
 
     print("Escribe 'salir' para terminar.")
@@ -159,7 +156,7 @@ def main() -> None:
             print("Sesión finalizada.")
             return
         if question:
-            _run_turn(messages, question)
+            _run_turn(messages, question, args.t0)
 
 
 if __name__ == "__main__":

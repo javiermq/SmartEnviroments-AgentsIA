@@ -1,0 +1,7 @@
+{
+  "nombre": "Mariola",
+  "vivienda": "Un piso en Granada, España",
+  "familia": {"marido": "Javi", "hija": "Helena", "hijo": "Sergio"},
+  "profesion": "Profesora de matemáticas en Motril",
+  "otro_contexto": "Trabajadora, cuida de su casa y de su familia y va al gimnasio"
+}

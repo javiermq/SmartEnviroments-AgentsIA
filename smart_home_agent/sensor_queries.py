@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-DATA_FILE = Path(__file__).resolve().parent.parent / "simulated_sensor_data_2026-09-16.tsv"
+DATA_FILE = Path(__file__).resolve().parent.parent / "sensor_context_data"
 
 # API pública: no se permite que el modelo elija nombres de columna o ficheros.
 SENSOR_TYPES = {
@@ -37,6 +37,7 @@ def query_aggregation(
     time_end: str,
     aggregation: str,
     data_file: Path | str = DATA_FILE,
+    reference_day: str | None = None,
 ) -> dict[str, Any]:
     """Agrega una señal del reloj en el intervalo semiabierto [time_init, time_end).
 
@@ -45,7 +46,8 @@ def query_aggregation(
         time_init: Inicio ISO-8601 o ``HH:MM``.
         time_end: Fin ISO-8601 o ``HH:MM``.
         aggregation: ``total``, ``mean``, ``max`` o ``min``.
-        data_file: Solo útil para pruebas; por defecto usa el TSV simulado del proyecto.
+        data_file: TSV o directorio; por defecto carga todos los días simulados.
+        reference_day: Fecha para HH:MM; por defecto el último día de datos.
 
     Para ``watch.sleep``, ``total`` representa minutos dormidos y ``mean`` la
     fracción de minutos dormidos en el intervalo.
@@ -57,15 +59,18 @@ def query_aggregation(
         raise ValueError("aggregation debe ser total, mean, max o min.")
 
     path = Path(data_file)
-    if not path.is_file():
+    if not path.exists():
         raise FileNotFoundError(f"No se encuentra el archivo de datos: {path}")
 
-    with path.open("r", encoding="utf-8", newline="") as handle:
-        rows = list(csv.DictReader(handle, delimiter="\t"))
+    paths = sorted(path.glob("simulated_sensor_data_*.tsv")) if path.is_dir() else [path]
+    rows = []
+    for source in paths:
+        with source.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows.extend(csv.DictReader(handle, delimiter="\t"))
     if not rows:
         raise ValueError("El archivo de datos está vacío.")
 
-    reference_day = rows[0]["timestamp"][:10]
+    reference_day = reference_day or max(row["timestamp"][:10] for row in rows)
     start = _parse_time(time_init, reference_day)
     end = _parse_time(time_end, reference_day)
     if end <= start:
