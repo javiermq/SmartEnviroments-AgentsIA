@@ -20,7 +20,7 @@ def normalized(text: str) -> str:
 def metric_types(text: str) -> list[str]:
     text = normalized(text)
     kinds = []
-    if re.search(r'\bpasos?\b', text):
+    if re.search(r'\bpasos\b|\b(?:un|1) paso\b', text):
         kinds.append('watch.steps')
     if re.search(r'\b(dorm\w*|sueno)\b', text):
         kinds.append('watch.sleep')

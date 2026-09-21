@@ -90,3 +90,9 @@ class VerifiedMetricsTests(unittest.TestCase):
         backend = ConversationBackend(T0)
         with patch.object(backend, '_request_ollama', return_value={'content': 'Para dormir mejor, procura mantener horarios regulares.'}):
             self.assertIn('horarios regulares', backend.respond('Consejos para dormir mejor'))
+
+    def test_next_step_is_not_a_watch_measurement(self):
+        backend = ConversationBackend(T0)
+        content = 'Estás cocinando. Llevas 16 minutos. ¿Cuál es el siguiente paso?'
+        with patch.object(backend, '_request_ollama', return_value={'content': content}):
+            self.assertEqual(backend.respond('¿Qué actividad estoy haciendo?'), content)
