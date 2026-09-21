@@ -18,7 +18,7 @@ except ImportError:  # Ejecución directa: python smart_home_agent/conversation_
     from context import system_prompt
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
-MODEL = "qwen3:1.7b"
+MODEL = "qwen3:4b-instruct-2507-q4_K_M"
 
 TOOL_SCHEMA = {
     "type": "function",

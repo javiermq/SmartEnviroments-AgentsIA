@@ -11,7 +11,7 @@ actividades. Véase [formato y semántica temporal](sensor_context_data/README.m
 
 La personalidad cercana, con humor suave y acompañamiento opcional, se edita en
 [`agent_style.txt`](sensor_context_data/agent_style.txt). Se recarga en cada turno.
-Para conversar con Ollama local y Qwen3 1.7B (sin razonamiento), desde la raíz del proyecto:
+Para conversar con Ollama local y Qwen3 4B Instruct 2507 (sin razonamiento), desde la raíz del proyecto:
 
 ```powershell
 python -u -m smart_home_agent.conversation_demo --t0 "2026-09-16T18:56:00+02:00"
@@ -21,7 +21,7 @@ Escribe `salir` para terminar. Esta demo usa Ollama en `127.0.0.1:11434` y conse
 el historial de diálogo durante la sesión. La primera respuesta puede tardar por
 la carga del modelo y el procesamiento del contexto.
 
-Esta demo requiere `ollama pull qwen3:1.7b` y envía `think: false` con un
+Esta demo requiere `ollama pull qwen3:4b-instruct-2507-q4_K_M` y envía `think: false` con un
 contexto de 8192 tokens. En cada turno muestra por stderr el prompt completo,
 los sensores, las actividades/HAR, la petición y la respuesta de Ollama.
 Las trazas de herramientas aparecen solo cuando el modelo las solicita.
