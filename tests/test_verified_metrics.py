@@ -96,3 +96,24 @@ class VerifiedMetricsTests(unittest.TestCase):
         content = 'Estás cocinando. Llevas 16 minutos. ¿Cuál es el siguiente paso?'
         with patch.object(backend, '_request_ollama', return_value={'content': content}):
             self.assertEqual(backend.respond('¿Qué actividad estoy haciendo?'), content)
+
+    def test_empanada_keeps_relevant_reply_without_interval_request(self):
+        backend = ConversationBackend(T0)
+        content = ('¡Genial! ¿Quieres un consejo para el proceso? '
+                   'Por ejemplo, puedo decirte cuántos pasos has hecho en el último minuto mientras cocinas. ¿Te interesa?')
+        with patch.object(backend, '_request_ollama', return_value={'content': content}):
+            answer = backend.respond('Voy a hacer una empanada')
+        self.assertEqual(answer, '¡Genial! ¿Quieres un consejo para el proceso?')
+        self.assertEqual(backend.messages[-1]['content'], answer)
+
+    def test_recipe_steps_are_not_watch_queries(self):
+        backend = ConversationBackend(T0)
+        content = 'Los pasos para preparar una empanada son: preparar la masa y hornearla 30 minutos.'
+        with patch.object(backend, '_request_ollama', return_value={'content': content}) as request:
+            self.assertEqual(backend.respond('Dime los pasos para preparar una empanada'), content)
+        request.assert_called_once()
+
+    def test_false_total_removed_without_discarding_other_sentences(self):
+        backend = ConversationBackend(T0)
+        with patch.object(backend, '_request_ollama', return_value={'content': 'Estás cocinando. Has dado cinco pasos hoy.'}):
+            self.assertEqual(backend.respond('¿Qué hago ahora?'), 'Estás cocinando.')

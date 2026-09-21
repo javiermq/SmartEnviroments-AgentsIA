@@ -129,7 +129,7 @@ def _run_turn(messages: list[dict], user_text: str, t0: str) -> None:
         visible_text = assistant.get("content", "")
         calls = assistant.get("tool_calls", [])
         if not calls:
-            visible_text = guard_unverified_answer(visible_text)
+            visible_text = guard_unverified_answer(visible_text, user_text)
             assistant["content"] = visible_text
 
         if calls:

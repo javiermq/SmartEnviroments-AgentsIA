@@ -20,7 +20,9 @@ def normalized(text: str) -> str:
 def metric_types(text: str) -> list[str]:
     text = normalized(text)
     kinds = []
-    if re.search(r'\bpasos\b|\b(?:un|1) paso\b', text):
+    # «Pasos para preparar una receta» no son medidas del reloj.
+    procedural = re.search(r'\bpasos (?:para|a seguir|de (?:la |una )?(?:receta|preparacion))\b', text)
+    if re.search(r'\bpasos\b|\b(?:un|1) paso\b', text) and not procedural:
         kinds.append('watch.steps')
     if re.search(r'\b(dorm\w*|sueno)\b', text):
         kinds.append('watch.sleep')
@@ -97,12 +99,27 @@ def verified_answer(user_text: str, t0: str, messages: list[dict], trace=None) -
     return ' '.join(answers) + f' Intervalo consultado: [{start.isoformat()}, {end.isoformat()}).'
 
 
-def guard_unverified_answer(content: str) -> str:
+def guard_unverified_answer(content: str, user_text: str = '') -> str:
     """Impide afirmaciones espontáneas sobre medidas fuera de la ruta verificada.
 
     Es deliberadamente conservador: no intenta validar lenguaje numérico libre.
     """
     number_words = r'\b(cero|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieci\w*|veinte|veinti\w*|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|cien\w*|\w+cientos|mil\w*|millon\w*|media|medio|cuarto|ningun\w*)\b'
-    if metric_types(content) and re.search(r'\d|' + number_words, normalized(content)):
-        return 'Para darte una cifra verificada de pasos o sueño, pregúntame por esa medida e indica el intervalo.'
-    return content
+    requested = set(metric_types(user_text))
+    sentences = re.split(r'(?<=[.!?])\s+|\n+', content)
+    kept = []
+    removed = False
+    for sentence in sentences:
+        kinds = set(metric_types(sentence))
+        unsupported = kinds and re.search(r'\d|' + number_words, normalized(sentence))
+        off_topic = kinds and not kinds.intersection(requested)
+        if unsupported or off_topic:
+            removed = True
+            continue
+        # No conservar una pregunta vacía ligada a una oferta que acabamos de quitar.
+        if removed and re.fullmatch(r'[¿¡\s]*(?:te interesa|quieres|te gustaria)[?!.\s]*', normalized(sentence)):
+            continue
+        kept.append(sentence)
+    if not removed:
+        return content
+    return ' '.join(kept).strip() or 'No tengo una medida verificada para afirmar eso.'

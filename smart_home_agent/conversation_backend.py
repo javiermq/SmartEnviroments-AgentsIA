@@ -66,7 +66,7 @@ class ConversationBackend:
             self.messages.append(assistant)
             calls = assistant.get("tool_calls", [])
             if not calls:
-                assistant['content'] = guard_unverified_answer(assistant.get('content', ''))
+                assistant['content'] = guard_unverified_answer(assistant.get('content', ''), user_text)
                 return assistant.get("content", "") or "No se obtuvo texto de respuesta."
 
             if trace:

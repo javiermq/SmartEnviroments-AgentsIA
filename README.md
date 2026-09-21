@@ -36,8 +36,11 @@ o dos timestamps ISO-8601 con zona horaria. Para intervalos ambiguos como «anoc
 o «esta semana» se pide concretar inicio y fin; no se sustituye por hoy.
 No se ofrece un total si faltan muestras o el intervalo supera `t0`.
 La muestra del reloj se presenta separadamente como `watch_minute_sample_NOT_TOTALS`.
-Fuera de esta ruta, un filtro conservador bloquea respuestas del modelo que combinan
-pasos o sueño con cifras (también números escritos en palabras); puede producir falsos positivos.
+Fuera de esta ruta, un filtro conservador elimina frases del modelo que combinan
+pasos o sueño con cifras (también números escritos en palabras), y ofertas de esas
+medidas ajenas al tema del usuario. Conserva las demás frases sin pedir un intervalo.
+Reconoce «pasos para preparar…» como instrucciones, no como medidas del reloj;
+puede producir falsos positivos en otras formulaciones.
 Esta protección no valida otras magnitudes ni todas las formas de expresar una medida
 en lenguaje natural; no sustituye una evaluación completa del agente.
 
