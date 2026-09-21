@@ -27,6 +27,20 @@ los sensores, las actividades/HAR, la petición y la respuesta de Ollama.
 Las trazas de herramientas aparecen solo cuando el modelo las solicita.
 Los sensores y las actividades se leen de archivos locales, no de servicios HTTP.
 
+Las consultas reconocidas de pasos y duración del sueño tienen una ruta verificada
+común a la demo y al backend: ejecutan `query_aggregation` y redactan los números
+directamente desde su resultado, sin pedir al modelo que los invente o reformule.
+En estos turnos verás trazas de herramienta, pero no una llamada a Ollama.
+Se admiten hoy (también por defecto), ayer, dos horas HH:MM en el mismo día,
+o dos timestamps ISO-8601 con zona horaria. Para intervalos ambiguos como «anoche»
+o «esta semana» se pide concretar inicio y fin; no se sustituye por hoy.
+No se ofrece un total si faltan muestras o el intervalo supera `t0`.
+La muestra del reloj se presenta separadamente como `watch_minute_sample_NOT_TOTALS`.
+Fuera de esta ruta, un filtro conservador bloquea respuestas del modelo que combinan
+pasos o sueño con cifras (también números escritos en palabras); puede producir falsos positivos.
+Esta protección no valida otras magnitudes ni todas las formas de expresar una medida
+en lenguaje natural; no sustituye una evaluación completa del agente.
+
 ## API de agregación
 
 La función Python `query_aggregation(sensor_type, time_init, time_end, aggregation)`

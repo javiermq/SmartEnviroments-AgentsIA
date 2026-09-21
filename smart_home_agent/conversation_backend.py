@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 from .sensor_queries import query_aggregation
 from .context import system_prompt
+from .verified_metrics import verified_answer, guard_unverified_answer
 
 TraceCallback = Callable[[str, dict[str, Any]], None]
 
@@ -52,6 +53,10 @@ class ConversationBackend:
         self.messages[0]["content"] = self._system_prompt(self.t0)
         self.last_gesture = None
         self.messages.append({"role": "user", "content": user_text})
+        verified = verified_answer(user_text, self.t0, self.messages, trace)
+        if verified is not None:
+            self.messages.append({"role": "assistant", "content": verified})
+            return verified
         for round_number in range(1, 5):
             assistant = self._request_ollama()
             assistant = {**assistant, "content": self._visible_answer(assistant.get("content", ""))}
@@ -61,6 +66,7 @@ class ConversationBackend:
             self.messages.append(assistant)
             calls = assistant.get("tool_calls", [])
             if not calls:
+                assistant['content'] = guard_unverified_answer(assistant.get('content', ''))
                 return assistant.get("content", "") or "No se obtuvo texto de respuesta."
 
             if trace:
@@ -72,6 +78,8 @@ class ConversationBackend:
                 if trace:
                     trace("tool_call", {"name": name, "arguments": arguments})
                 try:
+                    if name != "query_aggregation":
+                        raise ValueError("Herramienta no permitida.")
                     result = query_aggregation(**arguments, reference_day=self.t0[:10])
                     content = json.dumps(result, ensure_ascii=False)
                     if trace:

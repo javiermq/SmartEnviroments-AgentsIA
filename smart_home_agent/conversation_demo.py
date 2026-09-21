@@ -13,9 +13,11 @@ from urllib.request import Request, urlopen
 try:
     from .sensor_queries import query_aggregation
     from .context import system_prompt
+    from .verified_metrics import verified_answer, guard_unverified_answer
 except ImportError:  # Ejecución directa: python smart_home_agent/conversation_demo.py
     from sensor_queries import query_aggregation
     from context import system_prompt
+    from verified_metrics import verified_answer, guard_unverified_answer
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 MODEL = "qwen3:4b-instruct-2507-q4_K_M"
@@ -73,6 +75,7 @@ def _trace_context(prompt: str) -> None:
     print("\n[TRACE] PROMPT DE CONTEXTO", file=sys.stderr)
     print(prompt, file=sys.stderr)
     print("[TRACE] SENSORES EN t0:", json.dumps(context["sensors_at_t0"], ensure_ascii=False), file=sys.stderr)
+    print("[TRACE] MUESTRA RELOJ (NO TOTALES):", json.dumps(context["watch_minute_sample_NOT_TOTALS"], ensure_ascii=False), file=sys.stderr)
     print("[TRACE] HAR/ACTIVIDAD ACTUAL:", json.dumps(context["current_activities"], ensure_ascii=False), file=sys.stderr)
     print("[TRACE] HAR/ACTIVIDAD ÚLTIMAS 12H:", json.dumps(context["activities_last_12h"], ensure_ascii=False), file=sys.stderr)
 
@@ -106,6 +109,12 @@ def _run_turn(messages: list[dict], user_text: str, t0: str) -> None:
     _trace_context(messages[0]["content"])
     messages.append({"role": "user", "content": user_text})
     print(f"\nUSUARIO  > {user_text}")
+    verified = verified_answer(user_text, t0, messages,
+                              lambda event, data: print(f"[TRACE] {event}: {json.dumps(data, ensure_ascii=False)}", file=sys.stderr))
+    if verified is not None:
+        messages.append({"role": "assistant", "content": verified})
+        print(f"ASISTENTE> {verified}")
+        return
 
     for round_number in range(1, 5):
         try:
@@ -119,6 +128,9 @@ def _run_turn(messages: list[dict], user_text: str, t0: str) -> None:
         messages.append(assistant)
         visible_text = assistant.get("content", "")
         calls = assistant.get("tool_calls", [])
+        if not calls:
+            visible_text = guard_unverified_answer(visible_text)
+            assistant["content"] = visible_text
 
         if calls:
             print(f"TRAZA    > ronda {round_number}: {len(calls)} llamada(s) a herramienta")
@@ -128,6 +140,8 @@ def _run_turn(messages: list[dict], user_text: str, t0: str) -> None:
                 arguments = function.get("arguments", {})
                 print(f"TRAZA    > {name}({json.dumps(arguments, ensure_ascii=False)})")
                 try:
+                    if name != "query_aggregation":
+                        raise ValueError("Herramienta no permitida.")
                     result = query_aggregation(**arguments, reference_day=t0[:10])
                     tool_content = json.dumps(result, ensure_ascii=False)
                     print(f"RESULTADO> {tool_content}")

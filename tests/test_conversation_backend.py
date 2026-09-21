@@ -14,7 +14,9 @@ class ConversationBackendTests(unittest.TestCase):
             {"content": "Has hecho 4855 pasos.", "tool_calls": []},
         ])
         backend._request_ollama = lambda: next(responses)  # type: ignore[method-assign]
-        self.assertEqual(backend.respond("¿Cuántos pasos hice?"), "Has hecho 4855 pasos.")
+        answer = backend.respond("Consulta mi actividad")
+        self.assertNotIn("4855", answer)
+        self.assertTrue(any(m.get('role') == 'tool' for m in backend.messages))
 
     def test_keeps_gesture_from_bridge_response(self):
         backend = ConversationBackend("2026-09-16T18:56:00+02:00")
