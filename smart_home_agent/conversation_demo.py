@@ -18,7 +18,7 @@ except ImportError:  # Ejecución directa: python smart_home_agent/conversation_
     from context import system_prompt
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
-MODEL = "qwen3:4b"
+MODEL = "qwen3:1.7b"
 
 TOOL_SCHEMA = {
     "type": "function",
@@ -52,9 +52,10 @@ def _request_ollama(messages: list[dict]) -> dict:
         "messages": messages,
         "tools": [TOOL_SCHEMA],
         "stream": False,
-        "think": True,
+        "think": False,
         "options": {"num_ctx": 8192},
     }
+    _trace_ollama_request(payload)
     request = Request(
         OLLAMA_URL,
         data=json.dumps(payload).encode("utf-8"),
@@ -63,6 +64,23 @@ def _request_ollama(messages: list[dict]) -> dict:
     )
     with urlopen(request, timeout=180) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _trace_context(prompt: str) -> None:
+    """Muestra las partes del contexto que se inyectan en cada turno."""
+    marker = "CONTEXTO_JSON:\n"
+    context = json.loads(prompt.split(marker, 1)[1])
+    print("\n[TRACE] PROMPT DE CONTEXTO", file=sys.stderr)
+    print(prompt, file=sys.stderr)
+    print("[TRACE] SENSORES EN t0:", json.dumps(context["sensors_at_t0"], ensure_ascii=False), file=sys.stderr)
+    print("[TRACE] HAR/ACTIVIDAD ACTUAL:", json.dumps(context["current_activities"], ensure_ascii=False), file=sys.stderr)
+    print("[TRACE] HAR/ACTIVIDAD ÚLTIMAS 12H:", json.dumps(context["activities_last_12h"], ensure_ascii=False), file=sys.stderr)
+
+
+def _trace_ollama_request(payload: dict) -> None:
+    print("\n[TRACE] LLAMADA A OLLAMA", file=sys.stderr)
+    print(f"[TRACE] URL: {OLLAMA_URL} | modelo: {payload['model']}", file=sys.stderr)
+    print("[TRACE] PAYLOAD:", json.dumps(payload, ensure_ascii=False), file=sys.stderr)
 
 
 def _system_prompt(t0: str) -> str:
@@ -85,6 +103,7 @@ def _visible_answer(content: str) -> str:
 
 def _run_turn(messages: list[dict], user_text: str, t0: str) -> None:
     messages[0]["content"] = _system_prompt(t0)
+    _trace_context(messages[0]["content"])
     messages.append({"role": "user", "content": user_text})
     print(f"\nUSUARIO  > {user_text}")
 
@@ -95,6 +114,7 @@ def _run_turn(messages: list[dict], user_text: str, t0: str) -> None:
             raise RuntimeError("No se puede conectar con Ollama en el puerto 11434.") from exc
 
         assistant = response["message"]
+        print("[TRACE] RESPUESTA OLLAMA:", json.dumps(response, ensure_ascii=False), file=sys.stderr)
         assistant = {**assistant, "content": _visible_answer(assistant.get("content", ""))}
         messages.append(assistant)
         visible_text = assistant.get("content", "")
@@ -139,7 +159,8 @@ def main() -> None:
 
     messages = [{"role": "system", "content": _system_prompt(args.t0)}]
     print(f"Sesión iniciada en t0={args.t0}. Modelo: {MODEL}")
-    print("Razonamiento de Qwen activado. La traza muestra herramientas y resultados; la consola muestra la respuesta final.")
+    print("La traza detallada se escribe en stderr: prompt, sensores, HAR y Ollama.")
+    print("Razonamiento de Qwen desactivado (think=false). Las llamadas a herramientas y sus resultados se muestran cuando se ejecutan.")
 
     if args.question:
         _run_turn(messages, args.question, args.t0)
