@@ -20,7 +20,7 @@ def load_dotenv(path: Path = Path(".env")) -> None:
 @dataclass(frozen=True)
 class Settings:
     interface: str = "console"
-    ollama_model: str = "qwen3:4b"
+    ollama_model: str = "qwen3:4b-instruct-2507-q4_K_M"
     ollama_url: str = "http://127.0.0.1:11434/api/chat"
     reachy_host: str = "localhost"
     reachy_connection_mode: str = "localhost_only"
@@ -39,7 +39,7 @@ class Settings:
         load_dotenv()
         return cls(
             interface=os.getenv("INTERFACE", "console"),
-            ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:4b"),
+            ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:4b-instruct-2507-q4_K_M"),
             ollama_url=os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/api/chat"),
             reachy_host=os.getenv("REACHY_HOST", "localhost"),
             reachy_connection_mode=os.getenv("REACHY_CONNECTION_MODE", "localhost_only"),
