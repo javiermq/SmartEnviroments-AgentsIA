@@ -1,4 +1,6 @@
 # Instalar en un entorno independiente con acceso al SDK del robot.
+# Fallar rápido si no hay wheel compatible; no compilar en Reachy.
+--only-binary=:all:
 reachy-mini>=1.10,<2
-numpy>=1.26,<2
-opencv-python-headless>=4.8,<4.12
+numpy>=1.26,<3
+opencv-python-headless>=4.12,<5

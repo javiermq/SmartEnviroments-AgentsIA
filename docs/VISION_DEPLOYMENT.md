@@ -80,6 +80,7 @@ antes de esta prueba independiente; no detengas el daemon.
 
 ```bash
 python3 -m venv .venv-vision
+.venv-vision/bin/python -m pip install --upgrade pip
 .venv-vision/bin/python -m pip install -r requirements-vision-reachy.txt
 mkdir -p models
 curl --fail --location \
@@ -88,6 +89,14 @@ curl --fail --location \
 export REMOTE_VISION_URL="http://IP_DEL_ORDENADOR:11436/vision/check"
 .venv-vision/bin/python -u -m smart_home_agent.reachy_vision
 ```
+
+La instalación en Reachy permite NumPy 2 y exige paquetes precompilados
+(`--only-binary=:all:` en requirements). No uses aquí las restricciones de
+NumPy del servidor TensorFlow. Si pip muestra un `.tar.gz` o `Preparing metadata`
+para NumPy, interrumpe con Ctrl+C y actualiza este archivo de requisitos.
+Si no hay un paquete compatible, pip terminará con un error en vez de compilar;
+comprueba `.venv-vision/bin/python --version` y `uname -m` antes de cambiar de
+intérprete o arquitectura. No modifiques el entorno compartido del robot.
 
 El intervalo por defecto es **1 segundo**, según la configuración acordada para
 este proyecto; no hace falta pasar `--interval`. Se espera ese segundo tras
