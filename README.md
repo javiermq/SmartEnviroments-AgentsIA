@@ -221,3 +221,101 @@ texto al puente y pronuncia literalmente lo que se escriba en `HUMANO>`. Desde
 esa consola, `/tool {JSON}` simula una llamada a `query_aggregation`; el
 resultado aparecerá en la siguiente petición y podrás redactar la respuesta
 final. Para probar solo en el portátil, deja el host por defecto `127.0.0.1`.
+
+## Configuración actual: Reachy Mini con Ollama y audio remoto
+
+El portátil ejecuta Ollama y el puente de audio. Reachy ejecuta el agente y se
+conecta al portátil por la red local. Sustituye `IP_OLLAMA` e `IP_REACHY` por
+las IP actuales de cada sesión. No copies direcciones que aparezcan como enlaces
+Markdown: deben ser texto plano, por ejemplo `http://10.137.164.220:11435/stt`.
+
+### Listar dispositivos de la red desde PowerShell
+
+El siguiente comando prueba la subred de la interfaz Wi-Fi. Una IP que no
+responda a ping no queda confirmada como libre, porque algunos dispositivos
+bloquean ICMP.
+
+```powershell
+$red = (Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias 'Wi-Fi' |
+  Where-Object { $_.IPAddress -notlike '169.254.*' } |
+  Select-Object -First 1).IPAddress -replace '\.\d+$', ''
+
+$tareas = 1..254 | ForEach-Object {
+  $ip = "$red.$_"
+  $ping = [System.Net.NetworkInformation.Ping]::new()
+  [pscustomobject]@{ IP = $ip; Ping = $ping; Task = $ping.SendPingAsync($ip, 800) }
+}
+
+$tareas | ForEach-Object {
+  try {
+    if ($_.Task.GetAwaiter().GetResult().Status -eq 'Success') { $_.IP }
+  } finally {
+    $_.Ping.Dispose()
+  }
+}
+```
+
+### Portátil Windows
+
+Abre dos ventanas de PowerShell. En la primera, inicia Ollama en la IP del
+portátil. Cierra antes Ollama desde el icono de la bandeja si ya estaba abierto
+con otra configuración.
+
+```powershell
+$IP_OLLAMA = '10.137.164.220' # IP del portátil
+$IP_REACHY = '10.137.164.185' # IP actual de Reachy
+
+$env:OLLAMA_HOST = "${IP_OLLAMA}:11434"
+ollama serve
+```
+
+En la segunda ventana, inicia el puente de audio que reenvía el chat a Ollama.
+Descarga antes el modelo una vez con `ollama pull qwen3:4b-instruct-2507-q4_K_M`.
+
+```powershell
+cd C:\Users\Javier\Documents\GitHub\SmartEnviroments-AgentsIA
+
+$IP_OLLAMA = '10.137.164.220'
+& "C:\Users\Javier\AppData\Local\Programs\Python\Python311\python.exe" -u `
+  smart_home_agent\human_console_bridge.py `
+  --host $IP_OLLAMA --port 11435 `
+  --stt-model turbo --stt-device auto `
+  --tts-model "C:\Users\Javier\.piper-voices\es_ES-davefx-medium.onnx" `
+  --chat-mode ollama `
+  --ollama-url "http://127.0.0.1:11434/api/chat" `
+  --trace
+```
+
+Reachy accede al puente en el puerto 11435. Ollama queda accesible solamente
+desde el propio portátil, porque el puente reenvía a 127.0.0.1:11434.
+Para permitir solamente a Reachy acceder al puente, abre PowerShell como
+administrador y ejecuta una vez:
+
+```powershell
+$IP_REACHY = '10.137.164.185'
+New-NetFirewallRule -DisplayName 'Reachy Mini - Audio' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11435 -RemoteAddress $IP_REACHY
+```
+
+### Reachy
+
+Desde la raíz del repositorio en Reachy, exporta las direcciones y ejecuta el
+Python que contiene el SDK `reachy_mini`:
+
+```bash
+export IP_OLLAMA="10.137.164.220"
+export IP_REACHY="10.137.164.185"
+export REMOTE_STT_URL="http://${IP_OLLAMA}:11435/stt"
+export REMOTE_TTS_URL="http://${IP_OLLAMA}:11435/tts"
+export OLLAMA_URL="http://${IP_OLLAMA}:11435/api/chat"
+export OLLAMA_MODEL="qwen3:4b-instruct-2507-q4_K_M"
+export REACHY_HOST="localhost"
+export REACHY_CONNECTION_MODE="localhost_only"
+
+curl --connect-timeout 5 "http://${IP_OLLAMA}:11435/health"
+/venvs/apps_venv/bin/python -c "import reachy_mini; print('SDK Reachy OK')"
+/venvs/apps_venv/bin/python -u main.py --interface reachy --t0 "2026-09-16T18:56:00+02:00" --trace --speech-rms-threshold 0.03 --expressive-motion
+```
+
+`IP_REACHY` sirve para restringir las reglas de firewall del portátil. Puesto
+que el agente corre dentro de Reachy, conserva `REACHY_HOST=localhost` y
+`REACHY_CONNECTION_MODE=localhost_only`.

@@ -1,0 +1,4 @@
+# Instalar en un entorno independiente con acceso al SDK del robot.
+reachy-mini>=1.10,<2
+numpy>=1.26,<2
+opencv-python-headless>=4.8,<4.12

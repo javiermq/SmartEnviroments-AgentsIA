@@ -1,5 +1,8 @@
 .env
 .venv/
+.venv-vision/
 __pycache__/
 *.py[cod]
 temp_data/
+vision_data/
+models/
