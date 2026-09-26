@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import time
 import json
 import io
 import logging
@@ -12,12 +15,14 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .vision_batch import aggregate_batch, choose_identity
+
 LOG = logging.getLogger(__name__)
 USERS = {"javi": "Javi", "mariola": "mariola"}
 
 
 class CaptureRing:
-    """100 pares JPEG/JSON; continúa por el registro más antiguo al reiniciar."""
+    """100 registros de hasta tres JPEG y un JSON; el cursor persiste al reiniciar."""
 
     def __init__(self, directory: Path, size: int = 100):
         if not 1 <= size <= 100:
@@ -34,9 +39,18 @@ class CaptureRing:
                                   min(range(size), key=lambda i: paths[i].stat().st_mtime_ns if paths[i].exists() else 0))
 
     def save(self, data: bytes, result: dict) -> str:
+        return self.save_batch([data], result)
+
+    def save_batch(self, images: list[bytes], result: dict) -> str:
+        if not 1 <= len(images) <= 3:
+            raise ValueError("Se admiten de una a tres imágenes")
         with self.lock:
             path = self.directory / f"face_{self.next_slot:03d}.jpg"
-            for target, content in ((path, data), (path.with_suffix(".json"), json.dumps(result, ensure_ascii=False).encode())):
+            image_paths = [path] + [path.with_name(f"{path.stem}_{i}.jpg") for i in range(1, len(images))]
+            for i in range(len(images), 3):
+                path.with_name(f"{path.stem}_{i}.jpg").unlink(missing_ok=True)
+            entries = list(zip(image_paths, images)) + [(path.with_suffix(".json"), json.dumps(result, ensure_ascii=False).encode())]
+            for target, content in entries:
                 temporary = target.with_suffix(target.suffix + ".part")
                 temporary.write_bytes(content)
                 temporary.replace(target)
@@ -47,25 +61,14 @@ class CaptureRing:
             return path.stem
 
 
-def choose_identity(candidates: list[dict], margin: float) -> tuple[str, str]:
-    if any(not math.isfinite(item[key]) for item in candidates for key in ("distance", "threshold")):
-        return "unknow", "invalid_scores"
-    ordered = sorted(candidates, key=lambda item: item["distance"])
-    if not ordered:
-        return "unknow", "empty_gallery"
-    best = ordered[0]
-    if best["distance"] > best["threshold"]:
-        return "unknow", "no_match"
-    if len(ordered) > 1 and ordered[1]["distance"] - best["distance"] < margin:
-        return "unknow", "ambiguous"
-    return best["user"], "matched"
 
 
 class FaceEngine:
-    def __init__(self, directory: Path, model: str = "Facenet512", threshold: float | None = None, margin: float = 0.05):
+    def __init__(self, directory: Path, model: str = "Facenet512", threshold: float | None = None, margin: float = 0.05, detector: str = "yunet"):
         from deepface import DeepFace
 
         self.deepface, self.model = DeepFace, model
+        self.detector = detector
         self.threshold, self.margin = threshold, margin
         self.gallery: dict[str, list] = {}
         for folder, name in USERS.items():
@@ -95,7 +98,7 @@ class FaceEngine:
         LOG.info("Galería cargada: %s", {user: len(rows) for user, rows in self.gallery.items()})
 
     def represent(self, image):
-        return self.deepface.represent(img_path=image, model_name=self.model, detector_backend="opencv", enforce_detection=True, align=True)
+        return self.deepface.represent(img_path=image, model_name=self.model, detector_backend=self.detector, enforce_detection=True, align=True)
 
     def analyze(self, image) -> dict:
         base = {"user": "unknow", "emotion": None, "emotion_scores": {}, "model": self.model}
@@ -130,6 +133,79 @@ class FaceEngine:
             result["emotion_error"] = "analysis_failed"
         return result
 
+    def analyze_batch(self, images):
+        results = []
+        for index, image in enumerate(images):
+            started = time.monotonic()
+            LOG.info("Captura %s/3: detección %s y embedding %s", index + 1, self.detector, self.model)
+            try:
+                result = self.analyze(image)
+            except Exception:
+                LOG.exception("Captura %s: fallo de inferencia", index + 1)
+                result = {"user": "unknow", "status": "inference_error", "emotion": None, "emotion_scores": {}}
+            result["processing_ms"] = round((time.monotonic() - started) * 1000)
+            result["index"] = index
+            trace_result(f"Captura {index + 1}", result)
+            results.append(result)
+        result = aggregate_batch(results, self.margin)
+        result.update(model=self.model, detector=self.detector)
+        return result
+
+
+def trace_result(label, result):
+    LOG.info("%s: usuario=%s estado=%s", label, result.get("user"), result.get("status"))
+    for candidate in result.get("candidates", []):
+        LOG.info("%s: %s distancia=%.4f umbral=%.4f votos=%s", label, candidate["user"],
+                 candidate["distance"], candidate["threshold"], candidate.get("votes", "individual"))
+    LOG.info("%s: emoción=%s puntuaciones=%s", label, result.get("emotion"),
+             {key: round(value, 2) for key, value in result.get("emotion_scores", {}).items()})
+
+
+def decode_jpeg(data):
+    from PIL import Image
+    import cv2
+    import numpy as np
+    if not 0 < len(data) <= 2_000_000:
+        raise ValueError("invalid_image_length")
+    try:
+        with Image.open(io.BytesIO(data)) as encoded:
+            if encoded.format != "JPEG" or min(encoded.size) < 32 or max(encoded.size) > 2048:
+                raise ValueError("invalid_image")
+            encoded.verify()
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise ValueError("invalid_image") from exc
+    image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("invalid_image")
+    return image
+
+
+def parse_batch(data):
+    try:
+        payload = json.loads(data)
+        if not isinstance(payload, dict) or payload.get("version") != 1:
+            raise ValueError("invalid_batch_version")
+        frames = payload.get("frames")
+        if not isinstance(frames, list) or len(frames) != 3:
+            raise ValueError("expected_three_frames")
+        raw, images, metadata = [], [], []
+        for frame in frames:
+            if not isinstance(frame, dict) or not isinstance(frame.get("jpeg_base64"), str):
+                raise ValueError("invalid_frame")
+            jpeg = base64.b64decode(frame["jpeg_base64"], validate=True)
+            raw.append(jpeg)
+            images.append(decode_jpeg(jpeg))
+            # Solo metadatos acotados; nunca aceptar rutas de archivos del cliente.
+            info = {key: frame[key] for key in ("bbox", "quality", "captured_at") if key in frame}
+            if len(json.dumps(info, allow_nan=False)) > 2048:
+                raise ValueError("metadata_too_large")
+            metadata.append(info)
+        if len(set(raw)) != 3:
+            raise ValueError("duplicate_frames")
+        return raw, images, metadata
+    except (TypeError, UnicodeError, binascii.Error) as exc:
+        raise ValueError("invalid_batch") from exc
+
 
 def make_handler(engine, ring: CaptureRing):
     inference_lock = threading.Lock()
@@ -154,15 +230,17 @@ def make_handler(engine, ring: CaptureRing):
                 self.reply(404, {"error": "not_found"})
 
         def do_POST(self):
-            if self.path != "/vision/check":
+            is_batch = self.path == "/vision/batch"
+            if self.path not in {"/vision/check", "/vision/batch"}:
                 self.reply(404, {"error": "not_found"})
                 return
-            if self.headers.get("Content-Type", "").split(";")[0] != "image/jpeg":
-                self.reply(415, {"error": "expected_image_jpeg"})
+            expected_type = "application/json" if is_batch else "image/jpeg"
+            if self.headers.get("Content-Type", "").split(";")[0] != expected_type:
+                self.reply(415, {"error": "expected_" + expected_type})
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 2_000_000:
+                if not 0 < length <= (8_100_000 if is_batch else 2_000_000):
                     raise ValueError()
             except ValueError:
                 self.reply(413, {"error": "invalid_image_length"})
@@ -172,22 +250,15 @@ def make_handler(engine, ring: CaptureRing):
             except TimeoutError:
                 self.reply(408, {"error": "upload_timeout"})
                 return
-            # Comprueba el formato y tamaño antes de descomprimir con OpenCV.
-            from PIL import Image, UnidentifiedImageError
             try:
-                with Image.open(io.BytesIO(data)) as encoded:
-                    if encoded.format != "JPEG" or min(encoded.size) < 32 or max(encoded.size) > 2048:
-                        raise ValueError("invalid_image")
-                    encoded.verify()
-            except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError):
-                self.reply(400, {"error": "invalid_image"})
-                return
-            import cv2
-            import numpy as np
-
-            image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-            if len(data) != length or image is None or min(image.shape[:2]) < 32 or max(image.shape[:2]) > 2048:
-                self.reply(400, {"error": "invalid_image"})
+                if len(data) != length:
+                    raise ValueError("incomplete_upload")
+                if is_batch:
+                    raw, images, capture_metadata = parse_batch(data)
+                else:
+                    raw, images, capture_metadata = [data], [decode_jpeg(data)], [{}]
+            except ValueError as exc:
+                self.reply(400, {"error": str(exc)})
                 return
             if not inference_lock.acquire(blocking=False):
                 self.reply(503, {"error": "busy"})
@@ -195,14 +266,22 @@ def make_handler(engine, ring: CaptureRing):
             try:
                 metadata = {"request_id": str(uuid.uuid4()), "received_at": datetime.now(timezone.utc).isoformat()}
                 # Guarda antes de inferir para conservar también las capturas que fallen.
-                slot = ring.save(data, {**metadata, "status": "processing"})
+                started = time.monotonic()
+                LOG.info("[%s] Recibido: %s capturas, %s bytes", metadata["request_id"], len(raw), length)
+                slot = ring.save_batch(raw, {**metadata, "status": "processing", "capture_metadata": capture_metadata})
+                LOG.info("[%s] Guardado en %s", metadata["request_id"], slot)
                 code = 200
                 try:
-                    result = {**metadata, **engine.analyze(image), "capture_id": slot}
+                    analysis = engine.analyze_batch(images) if is_batch else engine.analyze(images[0])
+                    result = {**metadata, **analysis, "capture_id": slot}
                 except Exception:
                     LOG.exception("Fallo de inferencia")
                     code = 500
                     result = {**metadata, "user": "unknow", "emotion": None, "status": "inference_error", "capture_id": slot}
+                result["capture_metadata"] = capture_metadata
+                result["processing_ms"] = round((time.monotonic() - started) * 1000)
+                trace_result(f"[{metadata['request_id']}] Resultado {slot}", result)
+                LOG.info("[%s] Duración total: %s ms", metadata["request_id"], result["processing_ms"])
                 # Convierte aquí para que resultados no finitos sean un error explícito.
                 try:
                     serialized = json.dumps(result, ensure_ascii=False, allow_nan=False)
@@ -232,11 +311,12 @@ def main():
     parser.add_argument("--save-dir", type=Path, default=Path("temp_data/vision"))
     parser.add_argument("--threshold", type=float, default=None, help="Umbral de distancia coseno; por defecto el de DeepFace")
     parser.add_argument("--margin", type=float, default=0.05, help="Separación mínima entre candidatos")
+    parser.add_argument("--detector", choices=["yunet", "opencv"], default="yunet", help="Detector común para referencias y capturas (yunet)")
     args = parser.parse_args()
     if not math.isfinite(args.margin) or args.margin < 0 or (args.threshold is not None and not 0 < args.threshold <= 2):
         parser.error("margin debe ser >= 0 y threshold estar en (0, 2]")
-    logging.basicConfig(level=logging.INFO)
-    engine = FaceEngine(args.users_dir, threshold=args.threshold, margin=args.margin)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    engine = FaceEngine(args.users_dir, threshold=args.threshold, margin=args.margin, detector=args.detector)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(engine, CaptureRing(args.save_dir)))
     LOG.info("Visión lista en http://%s:%s", args.host, args.port)
     try:

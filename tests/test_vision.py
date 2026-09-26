@@ -166,18 +166,19 @@ class CameraAndEngineTests(unittest.TestCase):
     def test_camera_sends_only_detected_crop_and_throttles(self):
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
         robot, detector = Mock(), Mock()
-        robot.media.get_frame.side_effect = [frame, frame, frame, KeyboardInterrupt()]
+        robot.media.get_frame.side_effect = [frame] + [frame + i for i in range(1, 6)] + [KeyboardInterrupt()]
         face = np.array([[100, 100, 100, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, .99]], dtype=np.float32)
-        detector.detect.side_effect = [(None, None), (None, face), (None, face)]
-        with patch("smart_home_agent.reachy_vision.send_face", return_value={"user": "Javi"}) as send, patch("smart_home_agent.reachy_vision.time.sleep"), patch("smart_home_agent.reachy_vision.time.monotonic", side_effect=[10, 10, 10.1]), patch("builtins.print"):
+        detector.detect.side_effect = [(None, None)] + [(None, face)] * 5
+        with patch("smart_home_agent.reachy_vision.send_batch", return_value={"user": "Javi"}) as send, patch("smart_home_agent.reachy_vision.time.sleep"), patch("smart_home_agent.reachy_vision.time.monotonic", side_effect=[9, 10, 10.25, 10.5, 10.75, 11, 11]), patch("builtins.print"):
             with self.assertRaises(KeyboardInterrupt):
                 run_camera(robot, detector, "http://test", 2, 80)
         send.assert_called_once()
-        decoded = cv2.imdecode(np.frombuffer(send.call_args.args[1], dtype=np.uint8), cv2.IMREAD_COLOR)
+        decoded = cv2.imdecode(np.frombuffer(send.call_args.args[1][0]["jpeg"], dtype=np.uint8), cv2.IMREAD_COLOR)
         self.assertEqual(decoded.shape, (150, 150, 3))
 
     def test_engine_compares_cached_references_and_only_emotion(self):
         engine = FaceEngine.__new__(FaceEngine)
+        engine.detector = "yunet"
         engine.model, engine.threshold, engine.margin = "Facenet512", None, .05
         engine.gallery = {"Javi": [[1.0], [2.0]], "mariola": [[3.0]]}
         engine.deepface = Mock()
@@ -197,6 +198,7 @@ class CameraAndEngineTests(unittest.TestCase):
 
     def test_multiple_faces_and_failed_emotion_do_not_mix_identities(self):
         engine = FaceEngine.__new__(FaceEngine)
+        engine.detector = "yunet"
         engine.model, engine.threshold, engine.margin = "Facenet512", None, .05
         engine.gallery = {"Javi": [[1.0]]}
         engine.deepface = Mock()
