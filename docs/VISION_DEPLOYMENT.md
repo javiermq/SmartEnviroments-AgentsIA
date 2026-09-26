@@ -89,7 +89,11 @@ export REMOTE_VISION_URL="http://IP_DEL_ORDENADOR:11436/vision/check"
 .venv-vision/bin/python -u -m smart_home_agent.reachy_vision
 ```
 
-Opciones: `--interval 2` deja al menos dos segundos entre lotes enviados;
+El intervalo por defecto es **1 segundo**, según la configuración acordada para
+este proyecto; no hace falta pasar `--interval`. Se espera ese segundo tras
+terminar el lote anterior, además del tiempo de procesamiento y envío.
+
+Opciones: `--interval 1` establece explícitamente ese mismo intervalo;
 `--min-face 80` ignora caras menores de 80 píxeles en la imagen original;
 `--host localhost --connection-mode localhost_only` conecta dentro del robot.
 También se admite `--url` y `--detector-model`.

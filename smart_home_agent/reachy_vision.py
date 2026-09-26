@@ -75,7 +75,7 @@ def main():
     parser.add_argument("--detector-model", type=Path, default=Path("models/face_detection_yunet_2023mar.onnx"))
     parser.add_argument("--host", default=os.getenv("REACHY_HOST", "localhost"))
     parser.add_argument("--connection-mode", default=os.getenv("REACHY_CONNECTION_MODE", "localhost_only"))
-    parser.add_argument("--interval", type=float, default=2.0, help="Segundos mínimos entre lotes enviados")
+    parser.add_argument("--interval", type=float, default=1.0, help="Segundos mínimos entre lotes enviados (por defecto: 1)")
     parser.add_argument("--min-face", type=int, default=80, help="Tamaño mínimo de cara en píxeles originales")
     args = parser.parse_args()
     if not math.isfinite(args.interval) or args.interval <= 0 or args.min_face < 32:
