@@ -5,10 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, AsyncMock, patch
 
 from smart_home_agent.user_sessions import UserSessions
-from smart_home_agent.recognized_conversation import accepted_identity, circle
+from smart_home_agent.recognized_conversation import accepted_identity, circle, is_goodbye, run_recognized
 from smart_home_agent.speech_text import for_speech
 from smart_home_agent.human_console_bridge import make_handler
 
@@ -85,6 +85,74 @@ class SessionTests(unittest.TestCase):
 
 
 class MotionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_conversation_holds_identity_until_goodbye_then_recognizes_next_user(self):
+        import time
+        camera_passes = []
+        permit_holder = []
+        def camera(robot, detector, endpoint, interval, minimum, event, stop, permit):
+            permit_holder.append(permit)
+            for name in ['Javi', 'mariola']:
+                while not permit.is_set() and not stop.is_set():
+                    time.sleep(0.005)
+                if stop.is_set():
+                    return
+                camera_passes.append(name)
+                event('recognizing', None)
+                event('identity', dict(user=name, status='matched', candidates=[
+                    dict(user=name, distance=0.2, threshold=0.3, votes=2)]))
+                event('finished', None)
+                # Simula un evento tardío que no debe borrar la identidad.
+                event('finished', None)
+                while not permit.is_set() and not stop.is_set():
+                    time.sleep(0.005)
+            while not permit.is_set() and not stop.is_set():
+                time.sleep(0.005)
+
+        utterances = iter([TimeoutError('silencio'), 'Hola', 'Adiós, Reachy.', 'Hola', 'adios'])
+        async def listen():
+            self.assertFalse(permit_holder[0].is_set())
+            item = next(utterances)
+            if isinstance(item, Exception):
+                raise item
+            return item
+        async def no_motion(interface):
+            await asyncio.Future()
+        interface = SimpleNamespace(robot=Mock(), _gesture_task=None,
+                                    listen=listen, speak=AsyncMock(),
+                                    on_thinking=AsyncMock(), set_response_gesture=Mock(),
+                                    _idle_gesture=Mock())
+        with tempfile.TemporaryDirectory() as directory:
+            model = Path(directory) / 'model.onnx'
+            model.touch()
+            args = SimpleNamespace(detector_model=str(model), vision_url='unused',
+                                   conversation_url='unused', t0=T0, session_id='robot')
+            backends = []
+            def remote(endpoint, t0, user, model_name, session):
+                backend = SimpleNamespace(respond=Mock(return_value='Respuesta'), last_gesture=None)
+                backends.append((user, backend))
+                return backend
+            with patch.dict(sys.modules, {'cv2': SimpleNamespace(FaceDetectorYN=Mock())}), \
+                 patch('smart_home_agent.recognized_conversation.run_camera', camera), \
+                 patch('smart_home_agent.recognized_conversation.circle', no_motion), \
+                 patch('smart_home_agent.recognized_conversation.RemoteConversation', remote):
+                with self.assertRaisesRegex(RuntimeError, 'cámara'):
+                    await asyncio.wait_for(run_recognized(
+                        interface, SimpleNamespace(ollama_model='test'), args, None), timeout=3)
+        self.assertEqual(camera_passes, ['Javi', 'mariola'])
+        self.assertEqual([user for user, _ in backends], ['javi', 'mariola'])
+        for _, backend in backends:
+            backend.respond.assert_called_once_with('Hola', None)
+        self.assertEqual([call.args[0] for call in interface.speak.await_args_list],
+                         ['Hola Javi', 'Respuesta', 'Adiós Javi',
+                          'Hola Mariola', 'Respuesta', 'Adiós Mariola'])
+        self.assertGreaterEqual(interface._idle_gesture.call_count, 2)
+
+    def test_goodbye_accepts_stt_accents_and_punctuation_without_matching_other_topics(self):
+        for text in ['adios', '¡Adiós!', 'Bueno, adiós, Reachy.', 'Gracias, adiós']:
+            self.assertTrue(is_goodbye(text))
+        for text in ['Hola', 'No quiero decir adiós', 'Qué significa adiós']:
+            self.assertFalse(is_goodbye(text))
+
     async def test_cancel_recognition_returns_to_neutral(self):
         interface = SimpleNamespace(robot=Mock(), _idle_gesture=Mock())
         with patch.dict(sys.modules, {'reachy_mini.utils': SimpleNamespace(create_head_pose=lambda **kw: kw)}):

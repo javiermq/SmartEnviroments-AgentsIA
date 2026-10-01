@@ -97,16 +97,20 @@ dos de tres capturas. No se presenta la distancia como porcentaje de confianza.
 Debe calibrarse con imágenes ajenas a las referencias antes de uso real.
 
 Mientras recoge y verifica el lote, Reachy describe un círculo suave con
-pitch y roll de hasta dos grados, usando la API del SDK. Finaliza en neutro
+pitch y roll de hasta seis grados, entrada gradual de 0.8 segundos y una
+vuelta cada tres segundos, usando la API del SDK. Finaliza en neutro
 al reconocer, rechazar, perder la cara, fallar la petición o cerrar el agente.
 Una ventana de captura que se atasca se abandona a los ocho segundos; la
 petición al servidor tiene un timeout de sesenta segundos.
 
 La voz se activa tras reconocer a Javi o Mariola: dice «Hola Javi» o
-«Hola Mariola» y usa su sesión. No repite el saludo mientras siga reconociendo
-a la misma persona. Un rechazo desactiva el usuario hasta otra identificación
-válida. Se dejan diez segundos entre verificaciones para conversar; captura
-y gestos de reconocimiento se pausan durante una respuesta hablada.
+«Hola Mariola», fija su sesión y pausa el reconocimiento facial durante toda
+la conversación. Perder la cara, guardar silencio o agotar el timeout de
+escucha no cambia de usuario. Al escuchar «adiós» (también «adiós Reachy»,
+«bueno, adiós» o «gracias, adiós»), se despide sin consultar al LLM, vuelve a
+neutro y reactiva el reconocimiento para el siguiente usuario. El historial
+por persona se conserva en el servidor para futuras conversaciones.
+Se dejan diez segundos entre verificaciones fallidas mientras busca una cara.
 
 Los intervalos se expresan con horas y minutos en palabras, sin corchetes,
 timestamps ni offsets de zona horaria. Si el intervalo empieza el día anterior,
