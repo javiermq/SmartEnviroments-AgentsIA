@@ -30,27 +30,37 @@ def metric_types(text: str) -> list[str]:
 
 
 def requested_interval(text: str, t0: str) -> tuple[datetime, datetime]:
-    """Solo interpreta intervalos explícitos soportados; no inventa noches o semanas."""
+    """Resuelve horarios cotidianos; la ventana nocturna se declara en la respuesta."""
     moment = datetime.fromisoformat(t0.replace('Z', '+00:00'))
     day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
-    text = normalized(text)
+    text = normalized(text).replace('media noche', 'medianoche')
     iso = re.findall(r'\d{4}-\d{2}-\d{2}t\d{2}:\d{2}(?::\d{2})?(?:z|[+-]\d{2}:\d{2})', text)
     if len(iso) == 2:
         start, end = (datetime.fromisoformat(s.replace('z', '+00:00')) for s in iso)
     else:
-        times = re.findall(r'\b(\d{1,2}):(\d{2})\b', text)
-        if re.search(r'\b(anoche|noche|seman\w*|mes\w*|anteayer|manana|ultim\w*|antes|despues|hace|dias|lunes|martes|miercoles|jueves|viernes|sabado|domingo|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|media|promedio|maxim\w*|minim\w*)\b|\d{4}-\d{2}-\d{2}', text):
-            raise ValueError('Indica el inicio y el fin con dos timestamps ISO-8601 con zona horaria.')
-        start, end = (day - timedelta(days=1), day) if 'ayer' in text else (day, moment)
+        if re.search(r'\b(seman\w*|mes\w*|anteayer|ultim\w*|antes|despues|hace|dias|lunes|martes|miercoles|jueves|viernes|sabado|domingo|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|promedio|maxim\w*|minim\w*)\b|de media|\d{4}-\d{2}-\d{2}', text):
+            raise ValueError('¿Entre qué días y horas quieres que lo consulte? Puedes decir, por ejemplo, de ayer a las diez de la noche a hoy a las siete de la mañana, o escribir dos fechas con sus horas.')
+        if re.search(r'\bmanana\b', text) and not re.search(r'(?:esta|la|media) manana', text):
+            raise ValueError('Solo puedo consultar datos anteriores a la hora de referencia. ¿Qué horario quieres consultar?')
+        night = bool(re.search(r'\banoche\b|\b(?:esta|la|ultima) noche\b', text))
+        explicit = text.replace('medianoche', '00:00').replace('media manana', '10:00')
+        times = re.findall(r'\b(\d{1,2}):(\d{2})\b', explicit)
         if times:
             if len(times) != 2:
-                raise ValueError('Indica las dos horas del intervalo, por ejemplo entre 09:00 y 09:40.')
-            base = start
+                raise ValueError('¿Entre qué dos horas? Por ejemplo, de nueve a diez de la mañana, o escribe 09:00 y 10:00.')
+            base = day - timedelta(days=1) if 'ayer' in text or night else day
             start, end = (base.replace(hour=int(h), minute=int(m)) for h, m in times)
-        elif re.search(r'\b(entre|desde|hasta|de \d|a las|por la|esta tarde|esta madrugada)\b|\d', text):
-            raise ValueError('Indica el intervalo con dos horas HH:MM o dos timestamps ISO-8601.')
+            if night and end <= start:
+                end += timedelta(days=1)
+        elif night:
+            start = day - timedelta(days=1) + timedelta(hours=20)
+            end = min(day + timedelta(hours=12), moment)
+        elif re.search(r'\b(entre|desde|hasta|de \d|a las|por la|esta tarde|esta madrugada|media)\b|\d', text):
+            raise ValueError('¿Entre qué dos horas quieres que lo consulte? Puedes indicar, por ejemplo, 09:00 y 10:00.')
+        else:
+            start, end = (day - timedelta(days=1), day) if 'ayer' in text else (day, moment)
     if start.tzinfo is None or end.tzinfo is None or end <= start or end > moment:
-        raise ValueError('El intervalo debe tener zona horaria, inicio anterior al fin y no superar t0.')
+        raise ValueError('El inicio debe ser anterior al final y ambas horas deben ser anteriores a la hora de referencia. ¿Qué horario quieres consultar?')
     return start, end
 
 

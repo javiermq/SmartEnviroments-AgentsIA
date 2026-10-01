@@ -47,7 +47,7 @@ class VerifiedMetricsTests(unittest.TestCase):
         self.assertEqual(result['time_end'], '2026-09-16T00:00:00+02:00')
 
     def test_ambiguous_interval_does_not_default_to_today(self):
-        for question in ('Cuánto he dormido anoche', 'Pasos esta semana', 'Pasos desde las 10', 'Pasos mañana', 'Pasos el lunes', 'Cuánto dormí hace dos días'):
+        for question in ('Pasos esta semana', 'Pasos desde las 10', 'Pasos mañana', 'Pasos el lunes', 'Cuánto dormí hace dos días'):
             messages = []
             with patch('smart_home_agent.verified_metrics.query_aggregation') as query:
                 answer = verified_answer(question, T0, messages)

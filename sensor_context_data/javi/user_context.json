@@ -1,3 +1,12 @@
 {
-  "nombre": "Javi"
+  "nombre": "Javi",
+  "vivienda": "Un piso en Granada, España",
+  "familia": {
+    "esposa": "Mariola",
+    "hija": "Helena",
+    "hijo": "Sergio"
+  },
+  "otro_contexto": "Javi es el marido de Mariola y profesor universitario de informática y robótica. Sus hábitos reales no se han facilitado; no deben inferirse de los de Mariola ni de su profesión. Los horarios y sensores de esta carpeta son un escenario simulado propio para probar sesiones separadas, no observaciones reales.",
+  "datos_simulados": true,
+  "profesion": "Profesor universitario de informática y robótica"
 }

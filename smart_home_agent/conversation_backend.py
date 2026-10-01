@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 from .sensor_queries import query_aggregation
 from .context import system_prompt, DATA_DIR
 from pathlib import Path
-from .verified_metrics import verified_answer, guard_unverified_answer
+from .verified_metrics import verified_answer, guard_unverified_answer, metric_types, normalized
 
 TraceCallback = Callable[[str, dict[str, Any]], None]
 
@@ -46,6 +46,7 @@ class ConversationBackend:
         self.ollama_url = ollama_url
         self.messages: list[dict[str, Any]] = [{"role": "system", "content": self._system_prompt(t0)}]
         self.last_gesture: dict[str, Any] | None = None
+        self.last_metric_request: str | None = None
 
     def _system_prompt(self, t0: str) -> str:
         return system_prompt(t0, self.data_dir)
@@ -54,8 +55,16 @@ class ConversationBackend:
         self.messages[0]["content"] = self._system_prompt(self.t0)
         self.last_gesture = None
         self.messages.append({"role": "user", "content": user_text})
-        verified = verified_answer(user_text, self.t0, self.messages, trace, data_dir=self.data_dir)
+        query_text = user_text
+        if (not metric_types(user_text) and self.last_metric_request
+                and re.match(r"^(?:de |desde |entre )", normalized(user_text).strip())
+                and re.search(r"\d{1,2}:\d{2}|medianoche|media noche|media manana", normalized(user_text))):
+            query_text = "Cuánto " + " y ".join(
+                "he dormido" if kind == "watch.sleep" else "pasos he dado"
+                for kind in metric_types(self.last_metric_request)) + " " + user_text
+        verified = verified_answer(query_text, self.t0, self.messages, trace, data_dir=self.data_dir)
         if verified is not None:
+            self.last_metric_request = query_text
             self.messages.append({"role": "assistant", "content": verified})
             return verified
         for round_number in range(1, 5):

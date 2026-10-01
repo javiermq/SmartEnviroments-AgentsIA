@@ -25,3 +25,12 @@ desde el código, independientemente del directorio desde el que se ejecute Pyth
 En las consultas del agente, HH:MM se refiere al día de t0. En la CLI de agregación,
 sin t0, se refiere al último día de datos. Para varios días, usar ISO-8601 con zona.
 El t0 de una sesión es fijo; iniciar otra sesión para consultar otro instante.
+
+## Perfiles separados
+
+`mariola/` conserva el escenario original. `javi/` contiene un perfil propio
+(Javi es el marido de Mariola) y dos jornadas simuladas diferentes, con sensores
+regenerados para que sueño, pasos, habitación y señales domésticas correspondan
+a sus actividades. A las 18:56 del día 16, Javi hace ejercicio y Mariola cocina.
+La profesión de Javi, aportada por el usuario, es profesor universitario de
+informática y robótica. Estos escenarios no describen hábitos reales.

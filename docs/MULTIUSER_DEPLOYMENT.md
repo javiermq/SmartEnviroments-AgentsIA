@@ -13,10 +13,13 @@ robot desde Reachy Mini Control, manteniendo activo el daemon.
 - `sensor_context_data/javi/`: perfil, estilo, sensores y actividades de Javi.
 - `sensor_context_data/mariola/`: perfil, estilo, sensores y actividades de Mariola.
 
-Ambas carpetas contienen inicialmente copias independientes de los TSV
-simulados anteriores: **no son mediciones distintas ni datos reales**.
-Mariola conserva el perfil existente; Javi solo tiene su nombre, sin inventar
-profesión ni hábitos. Sustituye los archivos por los de cada persona.
+Mariola conserva el perfil y el escenario anteriores. Javi tiene un escenario
+simulado diferente para los dos días, con horarios, pasos, sueño y señales de
+vivienda coherentes con sus propias actividades. Su perfil indica que es el
+marido de Mariola y profesor universitario de informática y robótica; no se
+le atribuyen hábitos reales desconocidos.
+**Todos estos datos son simulados, no mediciones reales.** Sustituye los archivos
+por los de cada persona cuando dispongas de datos reales.
 Los archivos de la raíz se conservan para las demos y CLI anteriores.
 
 `POST /conversation` recibe `user`, `session_id`, `t0`, `model` y `text`.
