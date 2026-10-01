@@ -8,6 +8,9 @@ import asyncio
 import json
 import logging
 import sys
+import os
+from smart_home_agent.context import DATA_DIR
+from smart_home_agent.user_sessions import RemoteConversation
 
 from smart_home_agent.config import Settings
 from smart_home_agent.conversation_backend import ConversationBackend
@@ -40,10 +43,19 @@ async def run(args: argparse.Namespace) -> None:
     else:
         raise ValueError("--interface debe ser console o reachy")
 
-    backend = ConversationBackend(args.t0, model=settings.ollama_model, ollama_url=settings.ollama_url)
+    backend = (RemoteConversation(args.conversation_url, args.t0, args.user, settings.ollama_model, args.session_id)
+               if args.conversation_url else ConversationBackend(
+                   args.t0, model=settings.ollama_model, ollama_url=settings.ollama_url,
+                   data_dir=DATA_DIR / args.user))
     await interface.start()
     print(f"[{interface_name} listo] t0={args.t0}")
     try:
+        if args.face_recognition:
+            if interface_name != "reachy" or not args.conversation_url:
+                raise ValueError("--face-recognition requiere Reachy y --conversation-url")
+            from smart_home_agent.recognized_conversation import run_recognized
+            await run_recognized(interface, settings, args, trace_to_console if args.trace else None)
+            return
         while True:
             try:
                 user_text = await interface.listen()
@@ -88,6 +100,12 @@ def main() -> None:
         "--expressive-motion", action="store_true",
         help="Mueve las antenas al hablar y las devuelve a reposo al terminar.",
     )
+    parser.add_argument("--user", choices=["javi", "mariola"], default="mariola")
+    parser.add_argument("--session-id", default="reachy")
+    parser.add_argument("--conversation-url", default=os.getenv("REMOTE_CONVERSATION_URL", ""))
+    parser.add_argument("--face-recognition", action="store_true")
+    parser.add_argument("--vision-url", default=os.getenv("REMOTE_VISION_URL", "http://192.168.0.28:11436/vision/check"))
+    parser.add_argument("--detector-model", default="models/face_detection_yunet_2023mar.onnx")
     parser.add_argument("--trace", action="store_true", help="Muestra llamadas a herramientas y resultados.")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

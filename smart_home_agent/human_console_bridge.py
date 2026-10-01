@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import sys
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 import json
 import os
 import random
@@ -284,6 +288,10 @@ def forward_to_ollama(ollama_url: str, body: bytes, trace: bool) -> tuple[int, b
 
 
 def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_wavs: ReceivedWavRing, ollama_url: str | None, automatic: bool, echo: bool, trace: bool) -> type[BaseHTTPRequestHandler]:
+    from smart_home_agent.user_sessions import UserSessions
+    from smart_home_agent.speech_text import for_speech
+    sessions = UserSessions(ollama_url) if ollama_url else None
+
     class BridgeHandler(BaseHTTPRequestHandler):
         server_version = "HumanConsoleBridge/1.0"
 
@@ -302,7 +310,7 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_w
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path not in ("/api/chat", "/stt", "/tts"):
+            if self.path not in ("/api/chat", "/stt", "/tts", "/conversation"):
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             try:
@@ -311,7 +319,13 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_w
                     raise ValueError("Content-Length inválido")
                 body_in = self.rfile.read(length)
                 content_type = "application/json; charset=utf-8"
-                if self.path == "/stt":
+                if self.path == "/conversation":
+                    if sessions is None:
+                        raise ValueError("/conversation requiere --chat-mode ollama")
+                    response = sessions.respond(json.loads(body_in.decode("utf-8")))
+                    status = HTTPStatus.OK
+                    body = json.dumps(response, ensure_ascii=False).encode("utf-8")
+                elif self.path == "/stt":
                     if not body_in.startswith(b"RIFF"):
                         raise ValueError("/stt espera audio WAV")
                     saved_path = received_wavs.save(body_in)
@@ -325,7 +339,7 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_w
                     if not isinstance(text, str) or not text.strip():
                         raise ValueError("/tts espera JSON con texto no vacío")
                     status = HTTPStatus.OK
-                    body = tts.synthesize_wav(text.strip())
+                    body = tts.synthesize_wav(for_speech(text.strip()))
                     content_type = "audio/wav"
                 elif ollama_url:
                     status, body = forward_to_ollama(ollama_url, body_in, trace)
@@ -356,7 +370,7 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_w
                     response = console.reply(payload)
                     status = HTTPStatus.OK
                     body = json.dumps(response, ensure_ascii=False).encode("utf-8")
-            except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RuntimeError, OSError, TypeError) as exc:
                 self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
             self.send_response(status)

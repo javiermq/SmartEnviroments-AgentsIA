@@ -1,7 +1,9 @@
 # Visión por lotes: Reachy Mini → DeepFace
 
-El módulo de visión es independiente del audio y de la conversación. No activa
-STT ni TTS. El agente imprime un resultado por lote y el servidor muestra trazas
+El servidor de visión es independiente del audio y de la conversación.
+Para activar sesiones con un saludo y movimiento de reconocimiento, consulta
+[MULTIUSER_DEPLOYMENT.md](MULTIUSER_DEPLOYMENT.md). El cliente independiente
+`reachy_vision` descrito aquí no activa STT ni TTS. El agente imprime un resultado por lote y el servidor muestra trazas
 con cada paso, distancias de identidad y puntuaciones de expresión.
 
 ## Flujo y valores por defecto

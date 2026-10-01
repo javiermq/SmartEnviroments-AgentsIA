@@ -104,7 +104,7 @@ def send_batch(endpoint, samples, timeout=60):
 
 
 def run_camera(robot, detector, endpoint: str, interval: float, min_face: int,
-               stable_seconds: float = 1.0, stable_frames: int = 5):
+               stable_seconds: float = 1.0, stable_frames: int = 5, event=None, stop=None, permit=None):
     import cv2
     import numpy as np
 
@@ -114,10 +114,18 @@ def run_camera(robot, detector, endpoint: str, interval: float, min_face: int,
     previous_frame = None
     last_sample = float("-inf")
     sample_period = stable_seconds / (stable_frames - 1)
-    while True:
+    recognizing = False
+    recognition_started = 0.0
+    while stop is None or not stop.is_set():
+        if permit is not None and not permit.is_set():
+            time.sleep(0.05)
+            continue
         frame = robot.media.get_frame()
         now = time.monotonic()
         if frame is None:
+            if recognizing and event:
+                event("finished", None)
+            recognizing = False
             stability.reset()
             samples.clear()
             time.sleep(0.05)
@@ -125,6 +133,12 @@ def run_camera(robot, detector, endpoint: str, interval: float, min_face: int,
         if now - last_sent < interval:
             time.sleep(0.05)
             continue
+        if recognizing and now - recognition_started > 8.0:
+            recognizing = False
+            stability.reset()
+            samples.clear()
+            if event:
+                event("finished", None)
         # Una cámara congelada no debe producir votos duplicados.
         if previous_frame is not None and np.array_equal(frame, previous_frame):
             time.sleep(0.05)
@@ -141,6 +155,15 @@ def run_camera(robot, detector, endpoint: str, interval: float, min_face: int,
             x, y, w, h = candidate
             if min(w, h) >= min_face and x >= 0 and y >= 0 and x + w <= width and y + h <= height:
                 box = candidate
+        if box is not None and not recognizing:
+            recognizing = True
+            recognition_started = now
+            if event:
+                event("recognizing", None)
+        elif box is None and recognizing:
+            recognizing = False
+            if event:
+                event("finished", None)
         ready = stability.update(box, now)
         if box is None or stability.count == 1:
             if samples:
@@ -166,9 +189,16 @@ def run_camera(robot, detector, endpoint: str, interval: float, min_face: int,
             LOG.info("Enviando 3 de %s capturas estables; calidad=%s", stable_frames,
                      [round(sample["quality"]["score"], 3) for sample in selected])
             try:
-                print(json.dumps(send_batch(endpoint, selected), ensure_ascii=False), flush=True)
+                result = send_batch(endpoint, selected)
+                print(json.dumps(result, ensure_ascii=False), flush=True)
+                if event:
+                    event("identity", result)
             except (URLError, TimeoutError, ValueError) as exc:
                 LOG.warning("Servicio de visión no disponible: %s", exc)
+            finally:
+                recognizing = False
+                if event:
+                    event("finished", None)
             last_sent = time.monotonic()
             stability.reset()
             samples.clear()

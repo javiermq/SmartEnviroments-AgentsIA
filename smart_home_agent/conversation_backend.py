@@ -10,7 +10,8 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from .sensor_queries import query_aggregation
-from .context import system_prompt
+from .context import system_prompt, DATA_DIR
+from pathlib import Path
 from .verified_metrics import verified_answer, guard_unverified_answer
 
 TraceCallback = Callable[[str, dict[str, Any]], None]
@@ -38,22 +39,22 @@ TOOL_SCHEMA = {
 class ConversationBackend:
     """Qwen/Ollama y sus herramientas, sin detalles de consola o robot."""
 
-    def __init__(self, t0: str, model: str = "qwen3:4b-instruct-2507-q4_K_M", ollama_url: str = "http://127.0.0.1:11434/api/chat"):
+    def __init__(self, t0: str, model: str = "qwen3:4b-instruct-2507-q4_K_M", ollama_url: str = "http://127.0.0.1:11434/api/chat", data_dir: Path = DATA_DIR):
+        self.data_dir = Path(data_dir)
         self.t0 = t0
         self.model = model
         self.ollama_url = ollama_url
         self.messages: list[dict[str, Any]] = [{"role": "system", "content": self._system_prompt(t0)}]
         self.last_gesture: dict[str, Any] | None = None
 
-    @staticmethod
-    def _system_prompt(t0: str) -> str:
-        return system_prompt(t0)
+    def _system_prompt(self, t0: str) -> str:
+        return system_prompt(t0, self.data_dir)
 
     def respond(self, user_text: str, trace: TraceCallback | None = None) -> str:
         self.messages[0]["content"] = self._system_prompt(self.t0)
         self.last_gesture = None
         self.messages.append({"role": "user", "content": user_text})
-        verified = verified_answer(user_text, self.t0, self.messages, trace)
+        verified = verified_answer(user_text, self.t0, self.messages, trace, data_dir=self.data_dir)
         if verified is not None:
             self.messages.append({"role": "assistant", "content": verified})
             return verified
@@ -80,7 +81,7 @@ class ConversationBackend:
                 try:
                     if name != "query_aggregation":
                         raise ValueError("Herramienta no permitida.")
-                    result = query_aggregation(**arguments, reference_day=self.t0[:10])
+                    result = query_aggregation(**arguments, reference_day=self.t0[:10], data_file=self.data_dir)
                     content = json.dumps(result, ensure_ascii=False)
                     if trace:
                         trace("tool_result", result)

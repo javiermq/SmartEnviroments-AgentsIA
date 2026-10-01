@@ -71,9 +71,9 @@ def build_context(t0: str, data_dir: Path = DATA_DIR) -> dict:
             "activities_last_12h": history}
 
 
-def system_prompt(t0: str) -> str:
-    context = build_context(t0)
-    style = (DATA_DIR / "agent_style.txt").read_text(encoding="utf-8-sig").strip()
+def system_prompt(t0: str, data_dir: Path = DATA_DIR) -> str:
+    context = build_context(t0, data_dir)
+    style = (data_dir / "agent_style.txt").read_text(encoding="utf-8-sig").strip()
     return f"""Eres un asistente doméstico conversacional. La hora de referencia es {t0}.
 Responde en español y sé breve. Usa el perfil para personalizar sin inventar hechos.
 ESTILO DE CONVERSACIÓN:
@@ -102,7 +102,8 @@ La información actual aportada por el usuario prevalece sobre la instantánea d
 Actualiza tu interpretación de la situación cuando el usuario indique un cambio.
 No deduzcas hábitos, estados ni participación de personas a partir de su perfil.
 Comprueba los datos disponibles antes de afirmar cantidades o relaciones.
-Usa timestamps ISO-8601 con fecha y zona horaria, especialmente al cruzar medianoche.
+En las herramientas usa timestamps ISO-8601. Al hablar usa horas y minutos en palabras,
+sin fechas ISO ni zonas horarias. Si cruzas medianoche indica el día en lenguaje natural.
 Si no se indica intervalo, usa medianoche del día de t0 hasta t0.
 Los sensores binarios usan 0=inactivo y 1=activo; las demás señales conservan su valor.
 cercania_distance_* es adimensional: 1=máxima cercanía, 0=distancia de 10 m o más.

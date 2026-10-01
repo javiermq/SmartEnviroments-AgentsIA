@@ -28,7 +28,7 @@ class VerifiedMetricsTests(unittest.TestCase):
         with patch.object(backend, '_request_ollama', side_effect=AssertionError('No usar LLM para cifras')):
             answer = backend.respond('¿Cuántos pasos he dado y cuánto he dormido hoy?')
         self.assertIn('10009', answer)
-        self.assertIn('7 h y 0 min', answer)
+        self.assertIn('7 horas y 0 minutos', answer)
         results = [json.loads(m['content']) for m in backend.messages if m['role'] == 'tool']
         self.assertEqual([r['result'] for r in results], [10009, 420])
         self.assertEqual(backend.messages[-1]['content'], answer)
@@ -37,7 +37,7 @@ class VerifiedMetricsTests(unittest.TestCase):
         result = verified_answer('Pasos entre 09:00 y 09:40', T0, [])
         self.assertIn('4855', result)
         result = verified_answer('Cuánto he dormido entre 2026-09-15T22:15:00+02:00 y 2026-09-16T07:00:00+02:00', T0, [])
-        self.assertIn('8 h y 45 min', result)
+        self.assertIn('8 horas y 45 minutos', result)
 
     def test_yesterday_does_not_use_today(self):
         messages = []
@@ -76,7 +76,7 @@ class VerifiedMetricsTests(unittest.TestCase):
         with patch('smart_home_agent.conversation_demo._request_ollama', side_effect=AssertionError('No LLM')):
             with redirect_stdout(out), redirect_stderr(err):
                 _run_turn(messages, 'Cuánto he dormido hoy', T0)
-        self.assertIn('7 h y 0 min', out.getvalue())
+        self.assertIn('7 horas y 0 minutos', out.getvalue())
         self.assertIn('tool_call', err.getvalue())
         self.assertIn('tool_result', err.getvalue())
 

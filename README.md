@@ -319,3 +319,10 @@ curl --connect-timeout 5 "http://${IP_OLLAMA}:11435/health"
 `IP_REACHY` sirve para restringir las reglas de firewall del portátil. Puesto
 que el agente corre dentro de Reachy, conserva `REACHY_HOST=localhost` y
 `REACHY_CONNECTION_MODE=localhost_only`.
+
+## Conversación multiusuario con reconocimiento facial
+
+Consulta [docs/MULTIUSER_DEPLOYMENT.md](docs/MULTIUSER_DEPLOYMENT.md) para iniciar
+Javi y Mariola con carpetas e historiales separados, visión en 11436 y audio y
+conversación en 11435. En Reachy usa un único `main.py --face-recognition` para
+coordinar cámara, saludos, audio y movimientos.

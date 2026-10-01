@@ -1,0 +1,1051 @@
+%% 
+%% Copyright 2007-2025 Elsevier Ltd
+%% 
+%% This file is part of the 'Elsarticle Bundle'.
+%% ---------------------------------------------
+
+\documentclass[preprint,12pt]{elsarticle}
+
+
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{url}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{soul}
+\sethlcolor{yellow}
+\usepackage{ragged2e}
+\usepackage[hidelinks]{hyperref}
+
+
+
+\journal{Internet of Things}
+
+\begin{document}
+
+\begin{frontmatter}
+
+
+\title{Symbolic Representations for Human Activity Recognition: From Raw Signals to Lightweight Sensor-Language Models}
+
+\author[inst4]{Javier Medina-Quero}
+\author[inst4]{Jose Manuel Soto Hidalgo}
+\author[inst4]{Oresti Baños-Legrán}
+\author[inst4]{Aurora~Polo-Rodríguez}
+
+
+\affiliation[inst4]{organization={Department of Computer Engineering, Automation and Robotics, University of Granada},%Department and Organization
+            city={Granada},
+            postcode={18071}, 
+            country={Spain}}
+%% Abstract
+\begin{abstract}
+Human Activity Recognition (HAR) commonly relies on raw-signal temporal modelling, often achieving strong performance at the expense of interpretability, efficiency, and semantic transparency. This work proposes a symbolic HAR framework in which statistical descriptors and fuzzy logic-based abstractions are used to represent sensor behaviour in a more interpretable and semantically meaningful form. These symbolic representations are exploited both as discriminative features for HAR models and as sensor/class signatures that support explanation generation in lightweight language models. Building on this representation, we introduce \emph{Symbolic Sensor TinyLLaMA}, a HAR-oriented lightweight sensor-language framework designed for comparatively resource-efficient deployment. Rather than simply replacing a larger sensor-language model with a smaller one, the proposed approach reformulates sensor-language modelling around HAR-specific symbolic signatures, teacher-guided explanation generation, and dual implicit-explicit evaluation. In particular, tree-based teacher models, such as XGBoost, are used to guide the association between activity classes and discriminative symbolic features through a distillation-like strategy. The framework is evaluated on heterogeneous wearable and ambient-sensing datasets, including IMU-based and multi-occupancy smart-home environments. Experimental results compare raw-signal and symbolic representations across classical machine learning methods, deep learning architectures, boosted tree-based models, and sensor-aligned lightweight language models. The results show that symbolic representations can achieve competitive HAR performance while improving interpretability and enabling explicit textual explanations of sensor-based activity predictions.
+\end{abstract}
+
+
+
+%%Graphical abstract
+\begin{graphicalabstract}
+\begin{figure}[H]
+\centering
+    \includegraphics[width=1\linewidth]{abstract (1).pdf}
+\end{figure}
+\end{graphicalabstract}
+
+%%Research highlights
+%%Research highlights
+%%Research highlights
+\begin{highlights}
+\item HAR datasets are evaluated using both raw-signal and symbolic representations across classical baselines, deep learning models, boosted tree-based methods, and sensor-aligned LLMs, showing competitive HAR performance while enabling explicit textual explainability.
+
+\item A lightweight Symbolic Sensor TinyLLaMA framework is proposed for human activity recognition with comparatively reduced computational requirements, using statistical and fuzzy logic-based sensor signatures as interpretable symbolic features for heterogeneous temporal sensor data.
+
+\item Tree-based teacher models guide the generation of HAR class explanations by discriminative symbolic features through a distillation-like strategy, enabling the quantitative assessment of implicit HAR recognition and feature-selection consistency in LLMs.
+\end{highlights}
+%% Keywords
+\begin{keyword}
+%% keywords here, in the form: keyword \sep keyword
+Human Activity Recognition \sep symbolic features  \sep  language models \sep interpretability
+%% PACS codes here, in the form: \PACS code \sep code
+\PACS 07.05.Mh \sep 07.07.Df
+%% MSC codes here, in the form: \MSC code \sep code
+%% or \MSC[2008] code \sep code (2000 is the default)
+\MSC 68T50 \sep 68T30
+\end{keyword}
+
+\end{frontmatter}
+
+%% Add \usepackage{lineno} before \begin{document} and uncomment 
+%% following line to enable line numbers
+%% \linenumbers
+
+%% main text
+%%
+
+%% Use \section commands to start a section
+\section{Introduction}
+
+Human Activity Recognition (HAR) plays a central role in ambient-assisted living, intelligent environments, and pervasive healthcare systems, where heterogeneous wearable and ambient sensors enable continuous, non-invasive monitoring of human behavior~\cite{wang2024application}. These technologies offer significant potential to improve the quality of life of vulnerable populations by supporting early detection of abnormal situations and proactive care~\cite{rehan2024enhancing}. However, translating large volumes of raw sensor data into meaningful, actionable, and clinically relevant information remains a major challenge~\cite{rehman2022leveraging}.
+
+\hl{Recent works have also explored attention mechanisms to improve temporal and contextual feature extraction in wearable HAR}. Xu et al. \cite{xu2024parallel,xu2023enhanced,xu2022shallow} \hl{proposed contextual, positional, and parallel attention-based architectures to enhance the modelling of discriminative temporal patterns in sensor signals}. Although these approaches have demonstrated strong predictive performance, they often rely on complex black-box models that provide limited interpretability and require substantial computational resources~\cite{cruciani2019comparing}. This lack of transparency hinders their adoption in the human-centered and safety-critical domains, where understanding the decision process is as essential as precision~\cite{cao2024fuzzy}. As a result, there is growing interest in approaches that balance recognition performance with interpretability, robustness, and semantic transparency~\cite{alharthi2025explainable}.
+
+A promising approach for interpretable HAR is the use of feature-based symbolic representations, constructed from statistical descriptors and fuzzy abstractions that explicitly encode temporal and semantic properties of sensor streams. In contrast to latent representations learned by black-box models, symbolic descriptors provide an intermediate representation that can be inspected, verbalized, and related to domain concepts such as intensity, duration, variability, or sensor activation. This is particularly relevant in HAR scenarios where the objective is not only to predict an activity, but also to explain which sensor patterns support the decision. Early comparative studies have shown that carefully designed statistical features can achieve performance comparable to deep learning methods. For instance, Cruciani et al.~\cite{cruciani2019comparing} demonstrated that human-crafted statistical descriptors achieved results similar to---and in some cases superior to---those of deep learning models. More recently, symbolic and fuzzy logic-based approaches have been proposed to model sensor data in an interpretable manner~\cite{yogeesh2024sensor}. Fuzzy systems are especially relevant in this context because, when designed with meaningful linguistic variables and transparent rule structures, they are commonly regarded as interpretable or glass-box models~\cite{alonso2015interpretability, cpalka2017design}. In particular, fuzzy protoforms and linguistic summaries have proven effective for activity recognition and behavior analysis~\cite{polo2024human}.
+
+Symbolic descriptions of sensor behavior, based on statistical and logical descriptors, enable human-readable explanations and facilitate higher-level reasoning~\cite{li2025sensorllm, polo2025modelling}. From an explainable AI perspective, these representations provide a transparent-by-design alternative to purely post-hoc explanations, since the same features used for recognition can also be used to justify the decision in linguistic terms ~\cite{arrieta2020explainable}. In this work, symbolic representations built on statistical and fuzzy logic-based descriptors are adopted as semantic features that support robust reasoning across heterogeneous sensing modalities. They are further used as channel signatures, class signatures, and explanation evidence for aligning HAR models with lightweight language models.
+
+Parallel to these developments, large language models (LLMs) have recently attracted attention in HAR research due to their ability to process and reason over structured and unstructured textual information. Initial efforts have explored the use of LLMs through prompt engineering. Cleland et al.~\cite{cleland2024leveraging} showed that a fine-tuned BERT model achieved competitive performance on the Van Kasteren dataset, highlighting the potential of language models for smart-home activity recognition. More recent work has proposed zero-shot and end-to-end LLM-based approaches, such as LLMe2e~\cite{fiori2025leveraging}, which use a single prompt to jointly perform activity classification and explanation generation directly from sensor data.
+
+A complementary research line focuses on aligning sensor representations with language models by learning explicit semantic projections. SensorLLM~\cite{li2025sensorllm} introduced a two-stage framework that aligns sensor and statistical descriptions with LLaMA using a temporal encoder (Chronos) to facilitate sensor description generation. While this approach demonstrates the feasibility of using LLMs as reasoning engines over sensor data, it comes at the cost of increased architectural complexity and reliance on raw-signal temporal encoders. More broadly, these works highlight the importance of semantic representations, whether implicit through prompting or explicit through learned projections, when integrating sensor data with language models~\cite{zhang2025sensorlm}.
+
+In addition to deep learning and LLM-based approaches, classical machine learning models remain strong baselines in HAR. In particular, gradient-boosted decision tree ensembles such as XGBoost have consistently demonstrated high accuracy and robustness across diverse HAR datasets~\cite{zhang2019comprehensive, o2019comparison}. Despite their strong empirical performance and relative interpretability advantages compared to deep neural models, such models are often overlooked in recent HAR literature, where comparative evaluations are predominantly focused on deep learning architectures.
+
+Motivated by these observations, this paper investigates whether symbolic representations can serve as a unifying and interpretable foundation for both classical machine learning models and lightweight language models in HAR. Rather than focusing solely on architectural complexity, we emphasize the role of representation, interpretability, and semantic structure in activity recognition.
+
+The main contributions of this work are as follows:
+\begin{itemize}
+    
+    \item We provide a comprehensive comparison between raw-signal and symbolic representations across heterogeneous HAR datasets and modelling paradigms, including classical machine learning methods, deep learning architectures, boosted tree-based models, and sensor-aligned lightweight LLMs. This evaluation highlights the role of symbolic representations in balancing HAR performance, computational efficiency, and interpretability.
+
+    \item We propose fuzzy logic and statistical descriptors to construct symbolic and interpretable sensor representations. These representations are used as discriminative features for sensor streams, as interpretable explanations through feature selection, and as semantic signatures to support sensor--explanation alignment in lightweight language models.
+    
+    \item We introduce \emph{Symbolic Sensor TinyLlama} (S$^2$--TinyLlama), a lightweight HAR-oriented sensor-language framework designed for comparatively resource-efficient deployment. The proposed model uses a compact LLM backbone, focuses specifically on HAR, performs HAR recognition and sensor--text alignment within a single learning stage, representing  sensor channel activity-class with a single symbolic token, and integrating tree-based teacher models to guide class-aware explanations through a distillation-like strategy.
+    
+    \item We conduct an extensive experimental assessment across heterogeneous wearable and ambient sensing modalities, including IMU-based datasets (PAMAP2, MHealth, and MOBIACT) and multimodal smart-environment datasets (MARBLE and Multi--UWB), evaluating implicit HAR recognition, symbolic feature relevance, explicit textual explainability, and explanation consistency.
+\end{itemize}
+
+The remainder of the paper is organized as follows. Section~\ref{sec:methodology} describes the proposed symbolic sensor and class signatures, the raw-signal and symbolic HAR modelling pipelines, and the teacher-guided S$^2$--TinyLlama framework. Section~\ref{sec:experiments} presents the experimental setup, datasets, baseline models, evaluation metrics, and implementation details. Section~\ref{sec:results} reports and discusses the results for implicit HAR recognition, symbolic feature relevance, and explicit textual explainability. Finally, Section~\ref{sec:conclusion} summarizes the main findings, limitations, and future research directions.
+
+\section{Methods}
+\label{sec:methodology}
+
+\subsection{Symbolic Description of Sensor Streams}
+\label{Symbolic Description of Sensor Streams}
+This section introduces two complementary approaches for describing sensor streams in a symbolic and interpretable manner: (i) statistical temporal descriptors and (ii) fuzzy linguistic protoforms. Both methods are proposed to generate semantically meaningful representations directly from raw sensor data, without requiring domain-specific expert rules or activity-dependent feature engineering. This property constitutes a central contribution of this work.
+
+Starting from a sensor data stream, these methods generate multiple symbolic features that admit a direct semantic interpretation. Formally, a sensor stream from a sensor $s$ is denoted as $\vec{s} = \{s_0, \ldots, s_i\}$, where each measurement $s_i$ is acquired at timestamp $t_i$. The stream is defined over a temporal interval $[t_0, t_N]$ with a fixed sampling period $\Delta t$. The resulting representations are processed by partially or fully interpretable machine learning models and large language models (LLMs), enabling transparent reasoning over sensor data.
+
+
+\subsubsection{Statistical Temporal Descriptors}
+
+Statistical temporal descriptors provide a compact summary of sensor streams and constitute the first symbolic representation layer in this work. They are considered symbolic insofar as each descriptor corresponds to an explicit, human-interpretable semantic property of the signal. These descriptors are designed to capture local temporal behavior while remaining directly interpretable.
+
+Following prior works~\cite{li2025sensorllm, banos2014window}, each sensor stream $\vec{s}=\{s_0,\ldots,s_i\}$ is partitioned into a temporal sub-window under a sliding-window formulation. Let $\mathcal{T}^i = [T^{i},T^{i+1}]$ denote a generic sub-window of fixed duration $T$. In addition to individual sub-windows, short-range temporal dependencies are captured by group sizes $g \in \{2,\ldots,|\mathcal{T}|\}$ to capture short-range temporal patterns, defined as $\mathcal{T}^i_g = [T^{i}, \ldots, T^{i+g}]$ which correspond to the union of $g$ adjacent sub-windows.
+
+For each temporal segment $\mathcal{T}^i$, a set of statistical descriptors is computed by applying a generic aggregation operator $\phi(\cdot)$ to the samples within the sub-window:
+\begin{equation}
+\label{eq:stat_general}
+\phi\!\left(S[\mathcal{T}^i]\right),
+\end{equation}
+where $\phi(\cdot)$ denotes a family of statistical operators that summarize the distribution and sparsity of the signal within the window.
+
+As an illustrative example, a statistical temporal descriptor extracted at this stage corresponds to the mean value of \textless acceleration\_x\textgreater\ ( $x$-axis acceleration signal) over the interval $[3\text{s},4\text{s}]$, which takes the value 2.4.
+
+In this way, for a sensor stream $\vec{s}$, we extract general-purpose descriptors that summarize the signal distribution and sparsity over a temporal window: central tendency, dispersion, and range, as well as zero-missing values.
+
+\begin{itemize}
+    \item \textit{Binary sensors (open/close, presence).}
+    For binary or event-driven sensors, the extracted descriptors summarize state persistence and transition dynamics within a temporal sub-window. These features capture the final sensor state and the frequency of state changes, which are particularly informative in ambient sensing as sequences of binary events \cite{ordonez2013activity}.
+
+    \item \textit{Continuous sensors (IMUs, humidity, distance).} For continuous-valued signals, additional distributional descriptors are computed to characterize signal variability and shape. In particular, higher-order moments capturing asymmetry and tail behavior are included, as they are discriminative for wearable and motion-related sensing modalities in HAR~\cite{gomaa2023perspective}.
+\end{itemize}
+
+The full definition of the statistical operators used in this work is provided in the appendix.
+
+\subsubsection{Fuzzy Linguistic Protoforms}
+\label{sec:fuzzy_logic_representation}
+In addition to statistical descriptors, sensor streams are described using fuzzy linguistic protoforms that fuzzify normalized sensor samples and aggregate them across fuzzy temporal windows to produce high-level symbolic summaries of temporal behavior. This representation follows the protoform framework introduced by Zadeh~\cite{zadeh2002prototype} and enables the generation of human-readable descriptions directly from data.
+
+A fuzzy protoform adopts the general structure:
+\begin{equation}
+\label{eq:protoform}
+P = Q \; S \; V \; T,
+\end{equation}
+where $V$ denotes a linguistic variable associated with a sensor stream $S$, $T$ defines a fuzzy temporal window, and $Q$ is a fuzzy quantifier. Together, these elements encode the intensity, temporal localization, and relevance of sensor activity patterns using linguistic terms.
+
+\paragraph{Linguistic scales}
+Linguistic variables map standardized sensor values to interpretable fuzzy labels by means of linguistic scales \cite{higashi2025fuzzy}.
+
+For binary sensor sources, we employ a two-term linguistic variable:
+\[
+L_2 = \{\textit{is Enabled},\ \textit{is Disabled}\}.
+\]
+For continuous-valued sensor features, a five-term linguistic variable is used:
+\[
+L_5 = \{\textit{is Very Low},\ \textit{is Low},\ \textit{is Medium},\ \textit{is High},\ \textit{is Very High}\}.
+\]
+Similarly, fuzzy quantifiers and fuzzy temporal windows are defined using a
+five-level linguistic scale:
+\[
+Q_5 = \{\textit{None},\ \textit{Few},\ \textit{Some},\ \textit{Many},\ \textit{All}\},
+\]
+\[
+T_5 = \{\textit{At the beginning},\ \textit{Early},\ \textit{Middle},\ \textit{Towards the end},\ \textit{At the end}\}.
+\]
+Figure~\ref{fig:QVT} illustrates the shared trapezoidal partitions adopted for linguistic variables, temporal windows, and quantifiers.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=1.0\linewidth]{partition_shared_VQT.png}
+\caption{Trapezoidal membership functions shared by linguistic terms, temporal terms, and quantifiers using a five-level linguistic scale.}
+\label{fig:QVT}
+\end{figure}
+
+Formally, for a given protoform, the membership degree is obtained by aggregating the fuzzy sensor stream within the temporal window and applying the quantifier:
+\begin{equation}
+\label{eq:proto_general}
+P(S) = Q\!\left( V \cup T \right),
+\end{equation}
+where the operator $\cup$ denotes fuzzy temporal aggregation \cite{polo2024human}.
+
+This process yields human-readable symbolic descriptions that summarize sensor streams over time. For example, the protoform \textit{Many acceleration\_x is Low towards the end} captures low-intensity motion patterns occurring predominantly in the final part of a temporal segment.
+
+The formal definition of linguistic variables, membership functions, temporal aggregation, and quantification operators is provided in the appendix.
+
+\subsection{Black-, Grey-, and White-Box Models for HAR}
+\label{sec:reference_models}
+
+To contextualize the proposed approach, we evaluate a representative set of traditional and recent learning models commonly adopted in Human Activity Recognition (HAR)~\cite{banos2014window, ordonez2016deep, o2019comparison, zhang2019comprehensive}. These models span \emph{white-box}, \emph{grey-box}, and \emph{black-box} paradigms, enabling a systematic comparison of different trade-offs between predictive performance and interpretability.
+
+Crucially, these reference models are evaluated not only on raw sensor data, but also in conjunction with the proposed \emph{symbolic descriptions of sensor streams}. This allows us to analyze how each modeling paradigm benefits from, or interacts with, symbolic abstractions of the underlying signals, and to provide comparative results that isolate the impact of symbolic reasoning across model families.
+
+\paragraph{K-Nearest Neighbors (KNN)}
+KNN is employed as a distance-based learner operating directly in the feature space, with good performance after optimizing the window size and features \cite{banos2014window,reiss2012introducing}. While the model does not yield explicit decision rules, its predictions can be explained by inspecting the nearest neighbors contributing to each decision \cite{sivaroopan2025rag}. This makes KNN a weakly interpretable grey-box reference model for assessing the discriminative quality of the extracted statistical and symbolic features.
+
+\paragraph{Support Vector Machines (SVM)}
+Support Vector Machines are included in two complementary variants to balance predictive performance and interpretability. First, a \textit{linear SVM} is employed as an interpretable baseline. In this setting, the learned weight vector directly reflects each feature's contribution to the decision function, enabling feature-level analysis and ranking. This positions linear SVM as a grey-box model with a clear connection between input features and class discrimination, making it particularly suitable for evaluating the semantic relevance of the extracted symbolic and statistical representations.
+
+In addition, a non-linear SVM with a radial basis function (RBF) kernel is used to model complex decision boundaries. RBF-SVMs have shown strong performance in HAR, in some cases rivaling or surpassing deep learning approaches \cite{azimzadeh2025human,jobanputra2019human}. However, due to the implicit mapping into a high-dimensional feature space, the resulting decision function is not directly interpretable. Consequently, RBF-SVMs are treated as black-box models, prioritizing predictive accuracy over semantic transparency.
+
+\paragraph{Tree-based models}
+Decision-tree-based learners are included due to their high performance and varying levels of interpretability in HAR \cite{jobanputra2019human}. In particular, we consider:
+\begin{itemize}
+    \item (i) a C4.5 decision tree \cite{sanchez2018decision}, which constitutes a white-box model by producing explicit hierarchical decision rules.
+    \item (ii) XGBoost, a model based on gradient-boosted ensembles of decision trees that achieves high accuracy in HAR \cite{zhang2019comprehensive, o2019comparison}, at the cost of reduced transparency compared to single-tree models, and is therefore categorized as a grey-box model.
+\end{itemize}
+
+\paragraph{CNN--LSTM architectures}
+Convolutional--recurrent neural networks are included as state-of-the-art deep learning models for HAR \cite{ordonez2016deep}. Three convolutional layers extract local temporal patterns, while a two-layer LSTM with 512 hidden units captures longer-term dependencies. Despite their strong predictive capabilities, these architectures operate as black-box models with limited inherent interpretability.
+
+\paragraph{Temporal Convolutional Network with Attention (TCN)}
+A causal TCN with temporal attention is also included. The model comprises four residual convolutional blocks with 128 to 256 channels and dilation factors ranging from 1 to 8, enabling the extraction of temporal dependencies at multiple scales. A temporal attention layer then assigns greater weight to the most relevant time steps before the resulting representation is processed by two fully connected classification layers. Attention-based mechanisms have previously been explored in HAR to emphasize contextually relevant temporal information \cite{xu2022shallow}. However, although the attention weights provide an indication of temporal relevance, they do not yield explicit decision rules or fully traceable reasoning. Therefore, TCN+Attention is categorized as a black-box model.
+
+Figure~\ref{fig:modelsinter} summarizes the key interpretability mechanisms associated with each reference model and with the proposed approach. The S$^2$--TinyLlama model is sufficiently distinct to warrant a
+dedicated description in the following section.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=1.0\linewidth]{Models.pdf}
+\caption{Interpretability characteristics of reference and proposed HAR models}
+\label{fig:modelsinter}
+\end{figure}
+
+
+\subsection{Symbolic Sensor TinyLlama}
+\label{Symbolic Sensor TinyLlama}
+\paragraph{Aligning sensor data and LLMs}
+Recent sensor-language models have explored  the alignment of sensor streams with the latent space of large language models to enable semantic reasoning over non-textual signals. A representative example is SensorLLM  ~\cite{li2025sensorllm}, which introduces a multimodal framework that bridges raw sensor streams and LLaMA through a two-stage architecture. In the first stage, multivariate sensor signals are encoded using a pretrained temporal foundation model, Chronos, producing dense embeddings that capture fine-grained temporal dynamics. These embeddings are then projected into the language-model embedding space, allowing the LLM to process sensor-derived information together with textual tokens. In the second stage, the aligned sensor embeddings are processed by the LLaMA backbone, and HAR is formulated as a downstream classification task using pooled hidden states from the final transformer layers. This formulation demonstrates the potential of sensor--LLM alignment for HAR, but it also decouples temporal representation learning from semantic reasoning and depends on a large language backbone and an external temporal encoder. Building upon this paradigm, our objective is to design a HAR-specific, low-resource sensor-language framework in which symbolic sensor information, activity-class semantics, and textual explanations are learned within a compact unified model.
+
+
+S$^2$--TinyLlama is a lightweight HAR-oriented sensor-language framework that combines symbolic sensor features, activity-class semantics, CLIP-style sensor--class alignment, and teacher-guided textual explanations. The model uses the compact TinyLLaMA backbone, which retains the architecture and tokenizer of LLaMA~2 while reducing the model size to approximately 1.1 billion parameters. In comparison, the original LLaMA family includes models ranging from 7 to 65 billion parameters. This substantial reduction in parameter count lowers inference-time memory and computational requirements compared with larger LLaMA-based models \cite{zhang2024tinyllama}.  S$^2$--TinyLlama also removes the Chronos temporal encoder, replaces raw-signal encoding with statistical and fuzzy logic-based symbolic representations, and jointly optimizes HAR recognition, explanation learning, and sensor--class alignment in a single architectural block.
+
+
+\paragraph{Symbolic sensor features and signatures}
+For each temporal window $i$, the raw sensor stream is first transformed into a symbolic representation using the statistical and fuzzy logic-based descriptors introduced in Section~\ref{Symbolic Description of Sensor Streams}. Let $\mathbf{x}_{i,m}$ denote the symbolic descriptor of sensor channel $m$ for sample $i$. This descriptor contains only interpretable symbolic features, including statistical summaries and fuzzy linguistic activations computed from the corresponding sensor channel.
+
+These symbolic representations play three complementary roles in the proposed framework. First, they are used as discriminative features for HAR classification. Second, they provide channel-level sensor signatures, since each channel is represented by a compact symbolic description rather than by a raw temporal sequence. Third, they serve as semantic evidence for explanation generation, because the selected descriptors can be verbalized into human-readable statements about the sensor behaviour.
+
+At the channel level, the symbolic sensor signature of channel $m$ in sample $i$ is therefore defined directly from its statistical and fuzzy descriptors:
+\[
+\mathbf{s}_{i,m}^{\mathrm{ch}} = \mathbf{x}_{i,m}.
+\]
+
+A sample of generated symbolic sensor representation is :
+\begin{quote}
+
+\textit{Deviation of \textless gyroscope\_y\textgreater\ between [0s,1s] is 3.41;
+Some  \textless magnetometer\_x\textgreater\ is very low at the beginning (0.65); Mean of \textless TOILET\_PRESENCE\textgreater\ between [0s,2s] is 1.00.}
+\end{quote}
+
+
+Thus, channel signatures are purely symbolic and do not depend on a raw-signal temporal encoder. This design allows the same representation to be used for wearable IMU channels, ambient sensors, and binary-home sensors.
+
+\paragraph{Teacher-guided explainability and class signatures}
+To construct class-aware symbolic signatures and guide explanation learning, we use a tree-based teacher model, particularly XGBoost. The teacher is trained on the complete symbolic feature vector $\mathbf{x}_i$, obtained by concatenating the channel-level statistical and fuzzy descriptors. The XGBoost model provides two types of information: global feature relevance through gain-based importance, and class-specific feature contributions through prediction-contribution scores.
+
+First, the global gain values are used to select the most relevant symbolic features. Let $\mathcal{I}_K$ be the set of the top-$K$ symbolic features according to XGBoost gain. The reduced symbolic vector is then:
+\[
+\tilde{\mathbf{x}}_i = \mathbf{x}_{i,\mathcal{I}_K}.
+\]
+
+Second, for each activity class, the teacher provides class-specific contribution scores for the selected symbolic features. These scores are averaged over the training samples of each class and normalized to obtain a class-weight vector $\mathbf{w}_c$, where larger values indicate symbolic features that contribute more strongly to that activity. The resulting vector $\mathbf{w}_c$ defines a class signature: it indicates which symbolic features are most characteristic of activity class $c$. For a specific sample $i$, a dynamic class-conditioned symbolic signature is obtained by weighting the selected symbolic features with the class signature:
+\[
+\mathbf{s}_{i,c}^{\mathrm{cls}}
+=
+\tilde{\mathbf{x}}_i \odot \mathbf{w}_c.
+\]
+
+In this way, the teacher does not replace the HAR model, but provides class-aware symbolic evidence. Channel signatures describe what each sensor does, whereas class signatures identify which symbolic sensor patterns are most relevant for each activity. These signatures are also verbalized to create teacher-guided textual explanations used during language-model training.
+
+\paragraph{Projection into TinyLlama and one-stage learning}
+After constructing the symbolic channel features and teacher-informed class signatures, S$^2$--TinyLlama projects both sources of information into the TinyLlama embedding space. Each sensor channel is represented by a projected symbolic feature vector and by its corresponding sensor-name token. Given the channel signature $\mathbf{s}_{i,m}^{\mathrm{ch}}$, a trainable projector $f_{\phi}$ produces:
+\[
+\mathbf{e}_{i,m}^{s} = f_{\phi}(\mathbf{s}_{i,m}^{\mathrm{ch}}).
+\]
+
+Similarly, when class signatures are enabled, each activity class is represented by a teacher-weighted symbolic signature and by its corresponding class-name token. Given the class-conditioned signature $\mathbf{s}_{i,c}^{\mathrm{cls}}$, a second trainable projector $g_{\psi}$ produces:
+\[
+\mathbf{e}_{i,c}^{a} = g_{\psi}(\mathbf{s}_{i,c}^{\mathrm{cls}}).
+\]
+
+The input sequence is built by inserting these projected embeddings before the textual question--answer sequence. In practice, the prefix contains pairs of projected class-signature embeddings and class tokens, followed by pairs of projected channel embeddings and sensor tokens. The remaining positions correspond to the textual prompt and answer. This gives the model explicit access to: (i) symbolic channel evidence, (ii) teacher-informed activity-class signatures, and (iii) natural-language explanations.
+
+TinyLlama is used as a decoder-only language backbone. In the default lightweight configuration, the TinyLlama parameters are frozen, while the channel projector, the class-signature projector, the HAR classification head, and the newly added sensor/class token embeddings are trainable. This keeps the model compact while allowing the symbolic sensor and class representations to be adapted to the language-model space.
+
+The model is trained with a combined objective composed of four terms: HAR classification, class-level CLIP alignment, channel-level CLIP alignment, and next-token language modelling.
+
+We denote the standard cross-entropy loss between logits $\mathbf{a}_i$ and target label $b_i$ as:
+\begin{equation}
+\mathrm{CE}(\mathbf{a}_i,b_i)
+=
+- \frac{1}{N} \sum_{i=1}^{N}
+\log
+\frac{\exp(a_{i,b_i})}{\sum_{k=1}^{K} \exp(a_{i,k})}.
+\end{equation}
+
+For implicit HAR recognition, the classification head produces activity logits $\mathbf{z}_i$, and the HAR loss is defined as:
+\begin{equation}
+\mathcal{L}_{\text{HAR}}
+=
+\mathrm{CE}(\mathbf{z}_i, y_i).
+\end{equation}
+For class-level alignment, a CLIP-style loss aligns the pooled symbolic sensor representation with the hidden representations of the activity-class tokens. We first compute the temperature-scaled class-similarity logits as:
+\[
+r_{i,c}
+=
+\frac{
+\mathrm{cos}
+\left(
+{h}_i,
+{h}_{i,c}^{a}
+\right)
+}{\tau},
+\qquad c = 1,\ldots,|cls|.
+\]
+
+The class-level alignment loss is then defined as:
+\[
+\mathcal{L}_{\text{CLIP-cls}}
+=
+\mathrm{CE}
+\left(
+{r}_i,
+y_i
+\right),
+\]
+where ${r}_i = [r_{i,1},\ldots,r_{i,|cls|}]$ denotes the similarity vector between sample $i$ and all activity-class tokens. Here, ${h}_i$ denotes the pooled hidden representation of sample $i$, ${h}_{i,c}^{a}$ denotes the hidden representation associated with the activity-class token of class $c$, $\tau$ is the temperature parameter, $|cls|$ is the number of activity classes, and $y_i$ is the ground-truth activity label.
+
+For channel-level alignment, the projected symbolic channel embeddings are aligned with the corresponding sensor-token hidden states. This loss preserves the association between each sensor name and its symbolic feature representation inside the TinyLlama latent space:
+\[
+\mathcal{L}_{\text{CLIP-ch}}
+=
+1 -
+\mathrm{cos}
+\left(
+\mathbf{p}_{i,m},
+\mathbf{h}_{i,m}
+\right).
+\]
+Here, $\mathbf{p}_{i,m}$ denotes the projected symbolic representation of sensor channel $m$ for sample $i$, and $\mathbf{h}_{i,m}$ denotes the hidden representation of the corresponding sensor-name token after processing by TinyLlama.
+
+The language-model objective is formulated in a question--answer ($\mathcal{Q} \backslash \mathcal{A}$) format. Symbolic sensor tokens, class-signature tokens, and the question prompt are used as conditioning context, while the next-token loss is computed only over the answer span. This ensures that the model learns to generate sensor-grounded explanations without treating the prompt or non-text symbolic tokens as language-generation targets.
+\begin{equation}
+\mathcal{L}_{\text{LM}}
+=
+- \sum_{j \in \mathcal{A}}
+\log P_\theta(z^t_j \mid Z_i^{p}, Z_i^{a}, Z_i^{s}, Z^t_{<j}),
+\end{equation}
+where $\mathcal{A}$ denotes the supervised answer-token positions.
+
+The total training objective is therefore:
+\begin{equation}
+\mathcal{L}_{\text{total}}
+=
+\mathcal{L}_{\text{HAR}}
++
+\mathcal{L}_{\text{CLIP-cls}}
++
+\mathcal{L}_{\text{CLIP-ch}}
++
+\mathcal{L}_{\text{LM}}.
+\end{equation}
+
+In our combined training setting, all four components are active. HAR supervision learns the implicit activity classifier, class-level CLIP aligns each sample with teacher-informed activity signatures, channel-level CLIP preserves the correspondence between sensor tokens and symbolic channel features, and next-token learning teaches the model to produce explicit textual explanations grounded in the selected symbolic evidence. At inference time, the HAR prediction is obtained from the classification head, while the language-generation branch is used to produce the explicit explanation. Thus, the generated text is not used as the primary decision mechanism; instead, it provides a human-readable explanation of the predicted activity based on symbolic features and teacher-informed class evidence.
+
+Overall, S$^2$--TinyLlama employs a compact language backbone together with lightweight symbolic projection modules and a small HAR classification head, as shown in Figure~\ref{fig:TinyLlama}. The architecture avoids an external temporal encoder and instead relies on symbolic channel features, teacher-informed class signatures, CLIP-style alignment losses, and answer-only next-token learning to jointly support HAR recognition and explicit textual explanation.
+\begin{figure}[t]
+\centering
+\includegraphics[scale=0.5]{TinySensorLLama2.pdf}
+\caption{Architecture of the proposed S$^2$--TinyLlama model. Symbolic channel features and teacher-informed class signatures are projected into the TinyLlama embedding space, where they support joint HAR classification, CLIP-style alignment, and teacher-guided textual explanation generation.}
+\label{fig:TinyLlama}
+\end{figure}
+
+\section{Experimental Setup}
+\label{sec:experiments}
+
+\subsection{Datasets and Sensor Data Segmentation}
+For the experimental evaluation, we consider two complementary settings: (i) human activity recognition (HAR) using wearable inertial measurement units (IMUs), and (ii) multi-occupancy HAR using multimodal sensing in smart
+environments.
+
+\paragraph{Wearable inertial sensing datasets}
+
+We consider three public HAR benchmarks, \emph{PAMAP2}, \emph{MHealth}, and \emph{MOBIACT}, following the same data preparation protocol introduced in SensorLLM for comparative results.
+
+\emph{PAMAP2}~\cite{bleser2015personalized} contains recordings from nine subjects equipped with IMUs placed on the chest, wrist, and ankle, capturing acceleration, gyroscope, and magnetometer signals across 27 channels and 12 activity classes. Following the SensorLLM protocol, data from subjects 105 and 106 are used for testing, while the remaining subjects are used for training. The original sampling rate of 100~Hz is down-sampled to 50~Hz. During the alignment stage, window sizes $w \in [5,100]$ are considered, while for HAR evaluation a fixed window size of $w=100$ with a stride of 50 is employed.
+
+\emph{MHealth}~\cite{banos2014mhealthdroid} includes motion and vital-sign data collected from ten subjects using sensors placed on the chest, right wrist, and left ankle. We use acceleration signals from the chest, left ankle, and right lower arm, along with gyroscope data from the left ankle and right lower arm, yielding 15 channels and 12 activity classes. Data from subjects 1, 3, and 6 are used for testing, with the remaining subjects used for training. The data are sampled at 50~Hz and segmented using the same windowing strategy as PAMAP2, namely $w \in [5,100]$ for alignment and $w=100$ with a stride of 50 for HAR.
+
+\emph{MOBIACT}~\cite{chatzaki2016human} is a smartphone-based inertial sensing dataset for Activities of Daily Living, recorded with the device freely placed in the trouser pocket and without constraints on orientation. We consider the nine ADL classes (standing, walking, jogging, jumping, stairs up, stairs down, sitting, car step-in, and car step-out) using triaxial accelerometer data, optionally complemented with gyroscope signals. Raw signals are resampled to 20~Hz and segmented into 5~s windows (100 samples) with 50\% overlap. A subject-independent evaluation protocol is adopted, in which data from subjects \texttt{sub10}, \texttt{sub11}, and \texttt{sub12} are reserved for testing, and the remaining subjects are used for training.
+
+\paragraph{Multimodal smart-environment datasets.}
+
+We evaluate our approach on two public benchmarks for Human Activity Recognition in daily multi-occupancy and multimodal smart-environment settings: \emph{MARBLE} and \emph{Multi--UWB}.  
+
+\emph{MARBLE}~\cite{arrotta2021marble} is a multi-resident dataset collected in a smart-home environment, involving daily-life scenarios with simultaneous occupants. Each subject is equipped with wearable IMUs capturing acceleration, gyroscope, and magnetometer signals. At the same time, the environment is instrumented with binary sensors placed on household objects, location beacons, and smartphone interaction events. Wearable signals are resampled to 25~Hz and combined with binary and location streams encoded as persistent on/off channels. Data is segmented into overlapping temporal windows of 6~s with a stride of 1.2~s. The test split is constructed by interleaving complete instances from selected scenarios and time ranges involving different users (A1a, B2e, and D4mae), while all remaining data are used for training. This protocol enforces generalization across scenarios, temporal segments, and occupants.
+
+\emph{Multi--UWB}~\cite{anguita2025multi} is a long-term multi-occupancy HAR dataset collected in an instrumented indoor environment equipped with ultra-wideband localization, object interaction sensors, and room-level presence detectors. Activity annotations are provided as temporal intervals, and ambient sensor streams are aggregated into binary feature channels. To prevent temporal leakage, a day-based split is adopted: recordings from July 27th and July 28th are used for testing, while data from all remaining days are used for training. Temporal windows are constructed using long-term temporal windows around each activity instance, as proposed by the dataset authors.
+
+%\emph{ARUBA} ~\cite{cook2012casas} is a real-world smart-home dataset collected in a single-resident apartment equipped with binary motion and door sensors, annotated with daily activities over several months. The primary resident was a woman with regular visits from her children and grandchildren, introducing realistic multi-occupant interactions. Minute-level binary sensor activations are used to generate offline temporal windows of 45 minutes, composed of 30 minutes of past context and a 15-minute future horizon, with a stride of one minute. Rare or ambiguous classes \textit{Respirate} and \textit{Bed to Toilet} are removed, and semantically related activities are fused into higher-level categories. A strictly stratified evaluation protocol is applied, reserving 5\% of windows per class for testing.
+
+Given the extreme class imbalance and the substantial computational cost of training on the complete datasets, we down-sampled the training set to 1{,}000 instances per activity for multi-occupancy datasets. The resampling strategy was applied only during training, being the evaluation was performed on the original naturalistic test data, without down-sampling, using complete day-level or natural fragments that preserve the original class imbalance and temporal structure.
+
+\subsection{Evaluation and Metrics}
+\label{subsec:evaluation_metrics}
+
+\paragraph{Evaluation protocol.}
+Following the evaluation protocol commonly adopted in sensor-language HAR models such as SensorLLM~\cite{li2025sensorllm}, we do not employ cross-validation. Training deep neural models and lightweight LLM-based architectures is computationally expensive, requiring substantial time and memory per run. Therefore, all experiments are conducted using fixed train--test splits defined at the dataset level. This protocol enables a consistent comparison between classical machine learning models, boosted tree-based methods, deep learning baselines, and S$^2$--TinyLlama variants under the same data partitions.
+
+\paragraph{Symbolic dimensionality.}
+The symbolic representation is generated automatically from interpretable fuzzy protoforms and statistical temporal descriptors. For continuous channels, each fuzzy protoform combines one of five linguistic quantifiers, one of five fuzzy sensor states, and one of five temporal linguistic regions. This yields up to $5 \times 5 \times 5 = 125$ fuzzy descriptors per continuous channel. For binary channels, the same protoform structure is used, but only two sensor states are required, producing up to $5 \times 2 \times 5 = 50$ fuzzy descriptors per channel.
+
+Statistical descriptors are computed in parallel using a finer temporal aggregation scheme. Each window is divided into five temporal parts, and additional grouped regions are formed by joining consecutive parts of size two and three. This results in $5 + 4 + 3 = 12$ temporal regions. For each region, nine statistical descriptors are computed per channel: five basic statistics and four additional temporal-shape descriptors. Therefore, the statistical block contributes up to $12 \times 9 = 108$ descriptors per channel. Before model-based selection, each continuous channel can be represented by up to $125 + 108 = 233$ symbolic descriptors, while each binary channel can be represented by up to $50 + 108 = 158$ descriptors.
+
+\paragraph{HAR classification metrics.}
+Model performance is evaluated using standard classification metrics for Human Activity Recognition: \emph{accuracy}, \emph{macro-averaged F1 score} (F1--macro), and \emph{weighted F1 score} (F1--weighted). Accuracy measures the overall proportion of correctly classified activity windows. F1--macro gives equal importance to all activity classes and is therefore useful for assessing performance under class imbalance. F1--weighted accounts for the number of samples in each class and provides a global measure that reflects the empirical class distribution.
+
+\paragraph{Computational resources and GPU capabilities}
+All experiments were conducted on a high-performance workstation equipped with an Intel Core Ultra 9 285K processor (24 physical cores, up to 5.7 GHz), 256 GB of RAM, and 3.6 TB of NVMe solid-state storage. Model training and inference were accelerated using an NVIDIA GeForce RTX 5090 GPU based on the Blackwell architecture, featuring 32 GB of dedicated VRAM.
+
+The large memory capacity of the GPU enabled the efficient fine-tuning and evaluation of lightweight Sensor-Language Models (SLMs), including TinyLLaMA-based architectures with LoRA adaptation, while maintaining reasonable batch sizes and sequence lengths. The combination of high-end CPU resources, large system memory, and 32 GB of GPU memory ensured stable execution of the complete experimental pipeline, including feature extraction, symbolic descriptor generation, model training, and evaluation.
+
+
+\paragraph{Explicit explainability metrics}
+In addition to implicit HAR recognition, S$^2$--TinyLlama is evaluated in terms of explicit textual explainability. We report \emph{\hl{Explicit-Activity Consistency (EAC)}}, which measures whether the generated explanation is coherent with the predicted or target HAR class. We also report \emph{Relevant Sensor Coverage}, which evaluates whether the generated explanation includes the teacher-selected sensors that provide the main symbolic evidence for the activity. Finally, \emph{Ordered Evidence Consistency} measures whether the explanation preserves the relative importance of the most relevant sensors identified by the teacher model. In our experiments, Relevant Sensor Coverage and Ordered Evidence Consistency are computed over the three most relevant teacher-selected sensor evidences. These metrics assess whether the generated explanations are grounded in symbolic features and teacher-guided class signatures, rather than only being plausible free-form text.
+
+\paragraph{Efficiency and sustainability metrics}
+To compare the computational cost of the evaluated models, we report learning time in seconds. For classical and boosted tree-based models, we additionally estimate energy consumption and carbon emissions during training and inference using CodeCarbon \cite{fischer2025ground}. The reported efficiency indicators include carbon emissions per sample (kgCO$_2$eq/sample), energy consumption per sample (kWh/sample), and micro-watt-hours per sample ($\mu$Wh/sample). For S$^2$--TinyLlama, we also report total training time and evaluation-time energy estimates when available. 
+
+\paragraph{Evaluation settings}
+We consider three complementary evaluation settings to analyse the effect of the input representation and the modelling paradigm.
+
+\begin{itemize}
+    \item \textbf{Raw-signal HAR baselines:} models trained directly on sliding-window segments of raw sensor signals. This setting includes classical baselines such as KNN and SVM, as well as deep learning models such as Conv1D+LSTM. These models evaluate how much HAR performance can be obtained without symbolic abstraction.
+    
+    \item \textbf{Symbolic HAR baselines:} models trained on statistical and fuzzy logic-based symbolic features. This setting includes linear SVM, KNN, C4.5 decision trees, and XGBoost. These models evaluate whether interpretable symbolic representations can preserve competitive HAR performance while reducing representation complexity.
+    
+    \item \textbf{Symbolic sensor-language modelling:} two S$^2$--TinyLlama variants are evaluated. \begin{itemize}
+        \item S$^2$--TinyLlama$_0$ model uses only symbolic channel features and next-token explanation learning, without class signatures or CLIP-style alignment losses, as referenced in SensorLLama \cite{li2025sensorllm}.
+        \item S$^2$--TinyLlama  is trained with symbolic channel features, teacher-informed class signatures, CLIP-style class/channel alignment, and answer-only next-token explanation learning. 
+    \end{itemize}  
+    This setting evaluates whether lightweight LLMs can exploit symbolic representations for implicit HAR recognition, explicit explanation generation, and sensor--class alignment.
+\end{itemize}
+
+\paragraph{Training configuration}
+Classical machine learning and boosted tree-based models were trained using the hyperparameter settings described in their corresponding experimental configuration. Neural models were trained on fixed train--test splits using mini-batch optimization. For the Conv1D+LSTM and S$^2$--TinyLlama models, we used a batch size of 4 and trained for 40 epochs. S$^2$--TinyLlama was trained with the combined objective described in Section~\ref{Symbolic Sensor TinyLlama}, including HAR classification, class-level CLIP alignment, channel-level CLIP alignment, and answer-only next-token explanation learning.
+
+
+\paragraph{Data and models open source}
+All datasets, source code, and trained models used in this study are publicly available at:
+\url{https://github.com/javiermq/Symbolic-Interpretable-LLM-HAR}
+
+
+\section{Results}
+\label{sec:results}
+
+This section reports a quantitative comparison between temporal segmentation-based models operating directly on raw sensor signals and interpretable symbolic approaches based on statistical and fuzzy-logic descriptors, evaluated across wearable inertial-sensing and multi-occupancy smart-environment datasets.
+
+\paragraph{Wearable inertial sensing datasets}
+
+Table~\ref{tab:wearable_results} reports the performance of raw-signal temporal segmentation models and interpretable symbolic approaches on the MHEALTH, PAMAP, and MOBIACT wearable inertial sensing datasets. Values in parentheses indicate the gain or loss obtained by adding fuzzy symbolic descriptors with respect to the corresponding statistics-only representation. For each model and dataset, 10 independent runs were conducted, and the results are reported as the mean $\pm$ standard deviation. 
+
+
+\begin{table*}[t]
+\centering
+\caption{Performance comparison on wearable inertial sensing datasets (MHEALTH, PAMAP and MOBIACT)}
+\label{tab:wearable_results}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lccccccccc}
+\toprule
+\textbf{Model} 
+& \multicolumn{3}{c}{\textbf{MHEALTH}} 
+& \multicolumn{3}{c}{\textbf{PAMAP}} 
+& \multicolumn{3}{c}{\textbf{MOBIACT}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
+& Acc. & F1-macro & F1-weighted
+& Acc. & F1-macro & F1-weighted
+& Acc. & F1-macro & F1-weighted \\
+\midrule
+\multicolumn{10}{l}{\textit{Temporal segmentation-based models on raw sensor data}} \\
+KNN           
+& 0.66 & 0.63 & 0.67
+& 0.63 & 0.58 & 0.61
+& 0.58 & 0.48 & 0.55 \\
+SVM (RBF)     
+& 0.79 & 0.78 & 0.78
+& 0.88 & 0.85 & 0.88
+& 0.85 & 0.67 & 0.82 \\
+Conv1D+LSTM   
+& $0.87 \pm 0.02$ & $0.87 \pm 0.02$ & $0.86 \pm 0.02$
+& $0.82 \pm 0.04$ & $0.80 \pm 0.04$ & $0.81 \pm 0.05$
+& $0.84 \pm 0.07$ & $0.72 \pm 0.04$ & $0.83 \pm 0.07$ \\
+TCN+Attention 
+& $0.86 \pm 0.04$ & $0.86 \pm 0.04$ & $0.85 \pm 0.05$
+& $0.86 \pm {<}0.01$ & $0.84 \pm {<}0.01$ & $0.86 \pm {<}0.01$
+& $\mathbf{0.91 \pm 0.01}$ & $0.81 \pm 0.02$ & $\mathbf{0.91 \pm 0.01}$ \\
+\midrule
+\multicolumn{10}{l}{\textit{Symbolic representations}} \\
+KNN
+& 0.89 & 0.89 & 0.88
+& \textbf{0.88} & \textbf{0.86} & \textbf{0.88}
+& 0.87 & 0.78 & 0.86 \\
+SVM (Linear)
+& $\mathbf{0.92}$ (-0.01) & \textbf{0.92} (-0.01) & \textbf{0.92}
+& 0.87 (+0.08) & 0.85 (+0.09) & 0.87 (+0.09)
+& 0.91 & 0.80 & \textbf{0.90} \\
+C4.5
+& $0.87 \pm 0.00$
+& $0.87 \pm 0.00$ (+0.01)
+& $0.87 \pm 0.00$ (+0.01)
+& $0.75 \pm 0.02$
+& $0.72 \pm 0.02$
+& $0.76 \pm 0.02$ (-0.01)
+& $0.83 \pm 0.00$ (-0.03)
+& $0.68 \pm 0.02$ (-0.08)
+& $0.83 \pm 0.00$ (-0.04) \\
+XGBoost
+& $0.88 \pm 0.00$
+& $0.88 \pm 0.00$
+& $0.88 \pm 0.00$ (+0.01)
+& $0.87 \pm 0.00$
+& $0.85 \pm 0.00$ (-0.01)
+& $0.87 \pm 0.00$
+& $0.82 \pm 0.00$ (-0.02)
+& $0.75 \pm 0.00$ (+0.03)
+& $0.82 \pm 0.00$ (-0.01) \\
+\midrule
+\multicolumn{10}{l}{\textit{Sensor-aligned lightweight LLMs}} \\
+S$^2$--TinyLLaMA
+& $\mathbf{0.92 \pm 0.02}$
+& $0.90 \pm 0.03$
+& $0.90 \pm 0.02$
+& $0.86 \pm 0.02$
+& $0.84 \pm 0.02$
+& $0.84 \pm 0.02$
+& $\mathbf{0.91 \pm 0.01}$
+& $\mathbf{0.85 \pm 0.02}$
+& $\mathbf{0.91 \pm 0.01}$ \\
+S$^2$--TinyLLaMA$_0$
+& $0.90 \pm 0.02$ & $0.91 \pm 0.02$ & $0.89 \pm 0.01$
+& $0.85 \pm 0.02$ & $0.82 \pm 0.01$ & $0.84 \pm 0.02$
+& $0.89 \pm 0.02$ & $0.77  \pm 0.03$ & $0.87 \pm 0.01$\\
+SensorLLaMA
+& $0.89 \pm 0.04$ & $0.89 \pm 0.04$ & --
+& $0.86 \pm 0.01$ & $0.87 \pm 0.01$ & --
+& -- & -- & -- \\
+\bottomrule
+\end{tabular}
+}
+\end{table*}
+
+
+
+
+
+\paragraph{Multimodal smart-environment datasets}
+
+Table~\ref{tab:marble_uwb_results} reports the performance of raw-signal baselines, statistics-only representations, statistical+fuzzy symbolic representations, and sensor-aligned lightweight LLMs on the MARBLE and Multi--UWB smart-environment datasets. Values in parentheses indicate the gain or loss obtained by adding fuzzy symbolic descriptors with respect to the corresponding statistics-only representation. For each model and dataset, 10 independent runs were conducted, and the results are reported as the mean $\pm$ standard deviation. 
+
+\begin{table*}[t]
+\centering
+\caption{Performance comparison on multimodal smart-environment datasets (MARBLE and Multi--UWB).}
+\label{tab:marble_uwb_results}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Model}
+& \multicolumn{3}{c}{\textbf{MARBLE}}
+& \multicolumn{3}{c}{\textbf{Multi--UWB}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+& Acc. & F1-macro & F1-weighted
+& Acc. & F1-macro & F1-weighted \\
+\midrule
+
+\multicolumn{7}{l}{\textit{Temporal segmentation-based models on raw sensor data}} \\
+KNN
+& 0.69 & 0.46 & 0.70
+& 0.91 & 0.69 & 0.90 \\
+SVM (RBF)
+& 0.74 & 0.58 & 0.76
+& 0.96 & 0.83 & 0.96 \\
+Conv1D+LSTM
+& $0.78 \pm 0.01$
+& $0.63 \pm 0.01$
+& $0.80 \pm 0.01$
+& $0.97 \pm {<}0.01$
+& $0.90 \pm 0.02$
+& $0.97 \pm {<}0.01$ \\
+TCN+Attention
+& $0.77 \pm 0.01$
+& $0.63 \pm 0.01$
+& $0.79 \pm 0.01$
+& $0.97 \pm {<}0.01$
+& $0.91 \pm 0.01$
+& $0.97 \pm {<}0.01$ \\
+
+\midrule
+\multicolumn{7}{l}{\textit{Symbolic representations}} \\
+KNN
+& 0.73 (+0.01)
+& 0.59 (+0.02)
+& 0.75 (+0.01)
+& 0.90 (+0.01)
+& 0.66 (+0.01)
+& 0.90 (+0.01) \\
+SVM (Linear)
+& 0.77 (+0.01)
+& 0.60 (+0.01)
+& 0.78 (+0.01)
+& 0.96 (+0.01)
+& 0.87 (+0.02)
+& 0.96 (+0.01) \\
+C4.5
+& $0.75 \pm {<}0.01$
+& $0.59 \pm {<}0.01$
+& $0.76 \pm {<}0.01$ (-0.01)
+& $0.96 \pm {<}0.01$
+& $0.85 \pm 0.02$ (+0.02)
+& $0.96 \pm {<}0.01$ \\
+XGBoost
+& $\mathbf{0.82 \pm {<}0.01}$
+& $\mathbf{0.69 \pm 0.01}$
+& $\mathbf{0.83 \pm {<}0.01}$ (+0.01)
+& $\mathbf{0.98 \pm {<}0.01}$ (+0.01)
+& $\mathbf{0.92 \pm {<}0.01}$ (+0.01)
+& $\mathbf{0.98 \pm {<}0.01}$ (+0.01) \\
+
+\midrule
+\multicolumn{7}{l}{\textit{Sensor-aligned lightweight LLMs}} \\
+S$^2$--TinyLLaMA
+& $0.77 \pm 0.02$
+& $0.64 \pm 0.02$
+& $0.79 \pm 0.02$
+& $0.97 \pm {<}0.01$
+& $0.89 \pm {<}0.01$
+& $0.97 \pm {<}0.01$ \\
+S$^2$--TinyLLaMA$_0$
+& $0.75 \pm 0.03$
+& $0.61 \pm 0.03$
+& $0.76 \pm 0.02$
+& $0.96 \pm {<}0.01$
+& $0.83 \pm {<}0.01$
+& $0.95 \pm {<}0.01$ \\
+
+\bottomrule
+\end{tabular}
+}
+\end{table*}
+
+\paragraph{Explicit explainability evaluation}
+In addition to implicit HAR recognition performance, we evaluate the quality of the generated explanations using three complementary metrics. Explicit-Activity Consistency (EAC) measures whether the activity conveyed by the generated explanation is consistent with the activity predicted by the HAR classification branch. Relevant Sensor Coverage (RSC) evaluates whether the explanation includes the teacher-selected symbolic sensor evidences associated with the predicted activity. Ordered Evidence Consistency (OEC) assesses whether the explanation preserves the relative importance ranking of the most relevant symbolic evidences identified by the teacher model. Together, these metrics quantify the extent to which generated explanations are grounded in discriminative symbolic features rather than relying solely on plausible free-form textual descriptions. Table~\ref{tab:explicit_explainability} summarizes the implicit HAR recognition accuracy and the explicit explainability metrics (EAC, RSC, and OEC) obtained by the evaluated S$^{2}$--TinyLLaMA variants. This joint evaluation enables the analysis of both activity recognition performance and the consistency of the generated explanations with the teacher-selected symbolic evidence. \hl{Importantly, the EAC values reported in this explicit evaluation are obtained from the generated feature-based explanations and therefore differ from the implicit HAR classification results derived from the hidden-state classification head}.
+
+
+\begin{table*}[t]
+\centering
+\caption{Implicit HAR recognition and explicit explainability evaluation of the proposed sensor-language models. Implicit HAR Accuracy reports activity recognition from the classification head, while EAC, RSC, and OEC assess the consistency and grounding of the generated explanations.}
+\label{tab:explicit_explainability}
+
+\scriptsize
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.05}
+
+\begin{tabular}{l l c c c c}
+\hline
+Dataset & Model & \hl{Implicit HAR Accuracy} & EAC & RSC & OEC \\
+\hline
+
+\multirow{2}{*}{MHEALTH}
+& S$^{2}$--TinyLLaMA$_0$ & 0.90 & 0.91 & 0.78 & 0.69 \\
+& S$^{2}$--TinyLLaMA & \hl{0.92} & 0.91 & 0.81 & 0.72 \\
+\hline
+
+\multirow{2}{*}{PAMAP}
+& S$^{2}$--TinyLLaMA$_0$ & 0.85 & 0.78 & 0.70 & 0.64 \\
+& S$^{2}$--TinyLLaMA & \hl{0.86} & 0.81 & 0.70 & 0.63 \\
+\hline
+
+\multirow{2}{*}{MOBIACT}
+& S$^{2}$--TinyLLaMA$_0$ & 0.89 & 0.87 & 0.88 & 0.77 \\
+& S$^{2}$--TinyLLaMA & 0.91 & 0.89 & 0.91 & 0.79 \\
+\hline
+
+\multirow{2}{*}{MARBLE}
+& S$^{2}$--TinyLLaMA$_0$ & 0.75 & 0.64 & 0.68 & 0.65 \\
+& S$^{2}$--TinyLLaMA & \hl{0.77} & 0.76 & 0.78 & 0.74 \\
+\hline
+
+\multirow{2}{*}{Multi--UWB}
+& S$^{2}$--TinyLLaMA$_0$ & \hl{0.96} & 0.93 & 0.92 & 0.90 \\
+& S$^{2}$--TinyLLaMA & \hl{0.97} & 0.96 & 0.93 & 0.92 \\
+\hline
+
+\end{tabular}
+\end{table*}
+
+
+
+
+\paragraph{Computational cost and inference energy consumption}
+
+In addition to predictive performance, we also evaluate the computational cost of the considered models. Table~\ref{tab:training_time_appendix} reports the training time for each dataset and model, while Table~\ref{tab:inference_energy_appendix} summarizes the average inference energy consumption and associated carbon emissions per evaluated sample, including estimates derived from the available CodeCarbon measurements. Training time is measured in seconds, whereas inference energy and emissions are normalized per sample to enable comparison across datasets with different test-set sizes. When direct CodeCarbon measurements were not available for a specific configuration, the value is reported as an estimate derived from available measurements under comparable settings. This analysis is particularly relevant for HAR applications in resource-constrained wearable and smart-home environments, where model accuracy must be balanced with training cost, inference efficiency, and deployment feasibility.
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\caption{Training time in seconds by dataset and model}
+\label{tab:training_time_appendix}
+\resizebox{0.85\textwidth}{!}{
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Dataset (train/test samples)}
+& \textbf{XGBoost}
+& \textbf{KNN}
+& \textbf{SVM (Linear)}
+& \textbf{C4.5}
+& \textbf{S$^2$--TinyLLaMA} \\
+\midrule
+MHEALTH (2{,}491/1{,}063)     & 6.42  & 0.00 & 1.67   & 0.68 & 1594  \\
+PAMAP (8{,}400/5{,}184)       & 36.73 & 0.01 & 27.82  & 7.34 & 4953 \\
+MOBIACT (2{,}399/688)         & 1.28  & 0.00 & 0.62   & 0.27 & 1590 \\
+MARBLE (13{,}000/2{,}240)     & 40.09 & 0.01 & 141.06 & 5.99 & 8525  \\
+Multi--UWB (8{,}000/7{,}619)  & 6.77  & 0.00 & 10.95  & 1.67 & 6147 \\
+
+\bottomrule
+\end{tabular}
+}
+\end{table*}
+
+\begin{table}[t]
+\centering
+\scriptsize
+\caption{Average inference energy and emissions per evaluated sample.
+Emissions were calculated using a consistent carbon intensity of approximately
+$0.175$ kgCO$_2$eq/kWh.}
+\label{tab:inference_energy_appendix}
+
+\begin{tabular}{lcc}
+\toprule
+\textbf{Model}
+& \textbf{Infer. energy (kWh/sample)}
+& \textbf{Infer. emissions (kgCO$_2$eq/sample)} \\
+\midrule
+
+XGBoost
+& $1.7{\times}10^{-10}$
+& $2.9{\times}10^{-11}$ \\
+
+KNN
+& $2.2{\times}10^{-10}$
+& $3.9{\times}10^{-11}$ \\
+
+SVM (Linear)
+& $1.4{\times}10^{-10}$
+& $2.6{\times}10^{-11}$ \\
+
+C4.5
+& $1.4{\times}10^{-10}$
+& $2.5{\times}10^{-11}$ \\
+
+CNN--LSTM
+& $1.2{\times}10^{-6}$
+& $2.1{\times}10^{-7}$ \\
+
+TCN+Attention
+& $7.8{\times}10^{-7}$
+& $1.4{\times}10^{-7}$ \\
+
+S$^2$--TinyLLaMA
+& $5.1{\times}10^{-5}$
+& $8.9{\times}10^{-6}$ \\
+
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Interpretability and Explainability}
+
+For the evaluated white-box and grey-box models, interpretability is assessed by analysing how symbolic features contribute to the final prediction under different modelling paradigms (see Fig.~\ref{fig:modelsinter}):
+
+\begin{itemize}\setlength\itemsep{2pt}
+    \item \textbf{KNN:} interpretability is obtained through a local, instance-based analysis. For a given test sample, the squared Euclidean distance to its $k$ nearest neighbors is decomposed into feature-wise contributions. Features with the smallest average squared differences across neighbors are considered the most relevant, as they drive neighborhood similarity.
+    \item \textbf{C4.5:} interpretability is obtained through explicit decision paths. For a given test sample, the predicted class is explained by a sequence of hierarchical if--then rules over symbolic features, revealing thresholds and temporal conditions that lead to the final decision.
+    \item \textbf{SVM (Linear):} interpretability is obtained through feature-level contributions to the decision function. For a given test sample, features with higher positive or negative weights are considered most influential, as they push the decision toward or away from the predicted class.
+    \item \textbf{XGBoost:} interpretability is obtained through additive feature attributions. For a given test sample, feature contributions are quantified using SHAP values, identifying the symbolic features that most strongly support or oppose the predicted class.
+    \item \textbf{S$^2$--TinyLlama:} interpretability is obtained through symbolic descriptions processed by a compact LLM to produce human-readable textual summaries and semantic descriptions. For a given test sample, symbolic sensor features are transformed into concise summaries of the most relevant temporal and semantic patterns underlying the prediction.
+\end{itemize}
+
+% --- table ---
+\begin{table*}[!ht]
+\centering
+\tiny
+\caption{Illustrative interpretability examples for a shared test instance across models (prediction: \emph{Climbing stairs}).}
+\label{tab:interpretability_examples_compact}
+
+\renewcommand{\arraystretch}{0.92}
+\setlength{\tabcolsep}{3pt}
+
+\newcolumntype{Y}{>{\RaggedRight\arraybackslash}X}
+
+\newlength{\InnerColW}
+\setlength{\InnerColW}{0.37\linewidth}
+
+\begin{tabularx}{0.96\textwidth}{
+  >{\RaggedRight\arraybackslash\bfseries}p{0.12\textwidth}
+  Y
+}
+\toprule
+
+KNN &
+\begin{itemize}[leftmargin=*,nosep,topsep=0pt]
+  \item many \texttt{gyr\_la\_y} is low toward the end
+  \item void of \texttt{gyr\_rw\_x} between [3s] is 0.00
+  \item number of changes of \texttt{gyr\_rw\_y} between [3s] is 0.00
+  \item many \texttt{acc\_rw\_z} is very low toward the end
+\end{itemize}
+\\
+\midrule
+
+C4.5 &
+\begin{itemize}[leftmargin=*,nosep,topsep=0pt]
+  \item max of \texttt{acc\_rw\_x} between [1s,3s] is $-0.63$ $\le$ 1.57
+  \item none \texttt{acc\_la\_z} is low in the middle (0.00) $\le$ 0.09
+  \item max of \texttt{acc\_la\_x} between [0s,2s] is 14.50 $>$ 1.66
+  \item few \texttt{acc\_la\_z} is low in the middle (0.05) $\le$ 0.34
+  \item none \texttt{acc\_la\_y} is very low early in the segment (0.00) $\le$ 0.64
+  \item mean of \texttt{gyr\_rw\_x} between [1s,2s] is $-0.55$ $\le$ $-0.39$
+\end{itemize}
+\\
+\midrule
+
+SVM  &
+\noindent
+\begin{tabular}{@{}p{\InnerColW}@{\hspace{0.03\linewidth}}p{\InnerColW}@{}}
+\textit{Toward predicted class:} & \textit{Against predicted class:} \\
+\begin{itemize}[leftmargin=*,nosep,topsep=1pt]
+  \item none \texttt{gyr\_la\_x} is very high at the beginning
+  \item kurtosis of \texttt{acc\_la\_z} between [2s,4s] is 0.11
+  \item many \texttt{acc\_la\_z} is low early in the segment
+\end{itemize}
+&
+\begin{itemize}[leftmargin=*,nosep,topsep=1pt]
+  \item kurtosis of \texttt{acc\_la\_z} between [0s,2s] is $-0.07$
+  \item skewness of \texttt{gyr\_la\_z} between [2s,4s] is $-0.05$
+\end{itemize}
+\end{tabular}
+\\
+\midrule
+
+XGBoost &
+\noindent
+\begin{tabular}{@{}p{\InnerColW}@{\hspace{0.03\linewidth}}p{\InnerColW}@{}}
+\textit{Toward predicted class:} & \textit{Against predicted class:} \\
+\begin{itemize}[leftmargin=*,nosep,topsep=1pt]
+  \item skewness of \texttt{acc\_ch\_x} between [1s,3s] is 0.49
+  \item many \texttt{acc\_la\_z} is low early in the segment
+  \item min of \texttt{acc\_la\_y} between [0s,1s] is 0.12
+\end{itemize}
+&
+\begin{itemize}[leftmargin=*,nosep,topsep=1pt]
+  \item many \texttt{acc\_la\_z} is low toward the end
+  \item max of \texttt{acc\_la\_z} between [1s,2s] is $-0.02$
+\end{itemize}
+\end{tabular}
+\\
+\midrule
+
+S$^2$--TinyLlama &
+\textit{Generated semantic summary:}
+The activity is \texttt{climbing stairs} because of: max of \texttt{acc\_rw\_x} between [0s,1s] is 3.00;
+some \texttt{gyr\_la\_z} is low in the middle;
+max of \texttt{gyr\_la\_y} between [0s,2s] is $-0.65$.
+\\
+
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+
+\subsection{Discussion}
+
+The experimental results show that symbolic representations provide a competitive and interpretable alternative to raw-signal modelling across heterogeneous HAR datasets. On wearable inertial benchmarks, symbolic and sensor-language approaches achieve strong performance, with S$^2$--TinyLLaMA reaching 0.92 accuracy and 0.90 F1-macro on MHEALTH, 0.86 accuracy and 0.84 F1-macro on PAMAP, and 0.91 accuracy and 0.85 F1-macro on MOBIACT (Table~\ref{tab:wearable_results}). Similarly, on the smart-environment datasets, S$^2$--TinyLLaMA achieves 0.77 accuracy and 0.64 F1-macro on MARBLE, and 0.97 accuracy and 0.89 F1-macro on Multi--UWB (Table~\ref{tab:marble_uwb_results}). However, the results also show that the best-performing model depends on the dataset: classical symbolic models such as linear SVM, C4.5, and XGBoost remain highly competitive and, in some cases, match or outperform the LLM-based variants. This supports the view that S$^2$--TinyLLaMA should not be interpreted as a universal replacement for classical HAR models, but as a lightweight sensor-language framework that combines competitive recognition with explicit textual explainability.
+
+The comparison between statistics-only and statistical+fuzzy representations provides an ablation of the symbolic feature design. Across the evaluated datasets and models, adding fuzzy protoforms generally preserves predictive performance and can provide modest improvements, particularly in F1-macro, although some dataset- and model-dependent decreases are also observed. This indicates that fuzzy symbolic descriptors can enrich statistical features with linguistically meaningful temporal abstractions without substantially compromising predictive performance. Their value is therefore not only numerical, but also semantic: the same descriptors used for classification can be verbalized as evidence for activity explanations and projected as channel and class signatures in S$^2$--TinyLLaMA.
+
+\hl{The comparison between S$^2$--TinyLLaMA and S$^2$--TinyLLaMA$_0$ provides evidence of the combined effect of class signatures and CLIP-style alignment}. The full model, which combines symbolic channel features, teacher-informed class signatures, class/channel alignment losses, and answer-only next-token explanation learning, generally improves recognition performance over the channel-only variant. The improvements are particularly clear on PAMAP, MOBIACT, MARBLE, and Multi--UWB, while on MHEALTH the full model improves accuracy but obtains a slightly lower F1-macro. \hl{These results suggest that the combined use of class signatures and alignment mechanisms is associated with improved HAR recognition in most evaluated datasets and with stronger explicit explanation grounding}. The observed differences between HAR prediction performance and explanation quality are consistent with recent work showing that generating reliable explanations is more demanding than prediction alone \cite{quiles2026explaining}.
+
+At the same time, the computational-cost analysis shows that LLM-based models require substantially higher training and inference resources than classical and tree-based alternatives. Therefore, the practical value of S$^2$--TinyLLaMA lies in scenarios where textual explanation, semantic querying, or sensor-language interaction are required, rather than in cases where classification accuracy alone is the only objective. For purely predictive HAR tasks operating under stringent computational and energy constraints, conventional machine learning models such as SVM, C4.5, or XGBoost may still constitute a more suitable choice.
+
+Overall, the results highlight the need for dataset-aware HAR model selection. Each dataset presents different sensing modalities, class distributions, temporal dependencies, and sources of uncertainty. Consequently, no single model family dominates all settings.
+
+\section{Conclusions and Ongoing Work}
+\label{sec:conclusion}
+
+This work presented a comparative evaluation of human activity recognition approaches across heterogeneous sensor datasets, including raw-signal temporal segmentation models, statistics-only representations, statistical and fuzzy-symbolic representations, boosted tree-based models, and lightweight sensor-language models. The evaluation covered wearable IMU datasets, UWB-based localization data, and multi-occupancy smart-home environments. Overall, the results demonstrate that symbolic representations provide a competitive and interpretable alternative to direct raw-signal modelling, often preserving or improving predictive performance while enabling sensor-level explanations and semantic transparency.
+
+A central conclusion is that HAR performance depends strongly on the dataset, sensing modality, class structure, and temporal dynamics. No single model family dominates across all settings. Classical models such as SVM, C4.5, KNN, and XGBoost remain highly competitive and should be considered essential baselines in HAR research. On several datasets, these models match or outperform more complex neural alternatives, particularly when trained on well-structured symbolic representations.
+
+Symbolic descriptors enrich the input representation with linguistic and temporally meaningful abstractions that can support not only classification, but also feature selection, class-signature construction, and explanation generation. This highlights the role of fuzzy-symbolic features as transparent-by-design descriptors that bridge predictive modelling and explainable HAR.
+
+We also introduced S$^2$--TinyLLaMA, a lightweight HAR-oriented sensor-language framework that combines symbolic channel features, teacher-informed class signatures, CLIP-style class--channel alignment, and answer-only next-token learning for explanation generation. The full model generally improves upon the ablated S$^2$--TinyLLaMA$_0$ variant, indicating that class signatures and alignment losses contribute to both activity recognition and explanation grounding. However, the results also show that LLM-based models are not always the most appropriate choice when classification accuracy or computational efficiency is the sole objective. Their main value lies in scenarios requiring explicit textual explanations, semantic querying, and sensor-language interaction.
+
+The interpretability evaluation further distinguishes feature-level interpretability from model-level explanation quality. By comparing generated explanations with symbolic evidence selected by an \hl{XGBoost teacher model}, we quantified Explicit-Activity Consistency, Relevant Sensor Coverage, and Ordered Evidence Consistency. These metrics provide a systematic basis for assessing whether S$^2$--TinyLLaMA explanations are grounded in discriminative symbolic evidence rather than being merely plausible textual outputs.
+
+Finally, the computational-cost analysis confirms that lightweight sensor-language models still require substantially more training and inference resources than classical and tree-based alternatives. This reinforces the need to select HAR models according to deployment constraints, balancing accuracy, interpretability, energy consumption, and interaction requirements. Future work will explore retrieval-augmented and agentic LLM architectures for HAR, the automatic optimization of window size and symbolic feature construction, broader cross-validation when computationally feasible, and more detailed profiling of memory footprint, latency, and deployment behaviour on edge devices.
+
+
+
+\appendix
+\section{Statistical Temporal Descriptors}
+\label{app:statistical_descriptors}
+
+This appendix details the mathematical formulation of the statistical temporal descriptors used in this work.
+
+Let $S=\{s_0,\ldots,s_i\}$ be a discrete sensor stream sampled at period $\Delta t$. The stream is partitioned into a set of consecutive temporal sub-windows $\mathcal{T}^i = [T^i, T^{i+1}]$ of fixed duration $T$, following a
+sliding-window formulation. Each sub-window contains the subset of samples $S[\mathcal{T}^i] = \{s_t \mid t \in \mathcal{T}^i\}$. In addition, statistical descriptors are computed over larger temporal regions obtained by concatenating consecutive sub-windows. In particular, group sizes $g \in \{2,\ldots,|\mathcal{T}|\}$ capture short-range temporal patterns, defined as $\mathcal{T}^i_g = [T^{i}, \ldots, T^{i+g}]$ which correspond to the union of $g$ adjacent sub-windows.
+
+For each temporal sub-window $\mathcal{T}^i$, a family of statistical operators $\phi(\cdot)$ is applied to summarize the signal distribution and sparsity. In this work, these operators include measures of central tendency, dispersion, range, and signal presence:
+\begin{itemize}
+    \item Mean value:
+    \[
+    \mu(S[\mathcal{T}^i]) = \frac{1}{|\mathcal{T}^i|} \sum_{t \in \mathcal{T}^i} s_t
+    \]
+    \item Minimum and maximum values:
+    \[
+    \min(S[\mathcal{T}^i]), \qquad \max(S[\mathcal{T}^i])
+    \]
+    \item Void-indicator:
+    \[
+    \emptyset(S[\mathcal{T}^i]) =
+    \frac{1}{|\mathcal{T}^i|}
+    \sum_{t \in \mathcal{T}^i} \mathbb{I}[s_t = 0],
+    \]
+    which measures the proportion of zero-valued or missing samples.
+\end{itemize}
+
+For binary or event-driven sensor streams, additional descriptors are computed to capture state dynamics:
+\begin{itemize}
+    \item Final state within the window:
+    \[
+    \mathrm{last}(S[\mathcal{T}^i]) = s_{T^{i+1}-1}
+    \]
+    \item Number of state transitions:
+    \[
+    \mathrm{changes}(S[\mathcal{T}^i]) =
+    \sum_{t \in \mathcal{T}^i}
+    \mathbb{I}[s_t \neq s_{t-1}]
+    \]
+\end{itemize}
+
+These descriptors summarize persistence and transition activity, which are particularly informative for ambient binary sensors.
+
+For continuous-valued signals, higher-order distributional descriptors are included:
+\begin{itemize}
+    \item Standard deviation:
+    \[
+    \sigma(S[\mathcal{T}^i]) =
+    \sqrt{\mathbb{E}\!\left[(s_t-\mu)^2\right]}
+    \]
+    \item Central moments:
+    \[
+    m_\alpha(S[\mathcal{T}^i]) =
+    \frac{\mathbb{E}\!\left[(s_t-\mu)^\alpha\right]}{\sigma^\alpha},
+    \]
+    where $\alpha=3$ and $\alpha=4$ correspond to skewness and kurtosis, respectively.
+\end{itemize}
+
+\section{Fuzzy Linguistic Protoforms and Temporal Aggregation}
+\label{app:fuzzy_protoforms}
+
+This appendix presents the formal definition of the fuzzy linguistic representation used to extract symbolic protoforms from sensor streams. Sensor values are first normalized to the unit interval $X=[0,1]$. Linguistic variables are defined using trapezoidal membership functions. 
+
+Let $\mathcal{P}=\{p_1,\ldots,p_L\}$ be an ordered set of reference points with $p_1=0$ and $p_L=1$. In this work, $L=5$ and $\mathcal{P}=\{0,0.25,0.5,0.75,1\}$. Each reference point defines a linguistic term, and its support is determined automatically.
+
+The trapezoidal membership function is defined as:
+\begin{equation}
+\label{eq:trap}
+T[l_1,l_2,l_3,l_4](x)=
+\begin{cases}
+0, & x \le l_1, \\
+\dfrac{x-l_1}{l_2-l_1}, & l_1 < x < l_2, \\
+1, & l_2 \le x \le l_3, \\
+\dfrac{l_4-x}{l_4-l_3}, & l_3 < x < l_4, \\
+0, & x \ge l_4.
+\end{cases}
+\end{equation}
+
+Left and right shoulder functions are defined as $L[l_1,l_2](x)=T[l_1,l_2,l_2,l_2](x)$ and $R[l_1,l_2](x)=T[l_1,l_1,l_1,l_2](x)$.
+
+
+A fuzzy temporal window (FTW) models linguistic temporal regions such as \textit{early} or \textit{towards the end}. Given a reference time $t^*$ and a timestamp $t_i$, the temporal distance is defined as $\Delta t_i^* = t^* - t_i$, with $t^* > t_i$. The membership degree $\overline{T}(\Delta t_i^*)$ is obtained by applying a trapezoidal membership function to the normalized temporal distance.
+
+\subsection{Fuzzy temporal aggregation}
+
+Let $V=\{(v_i,t_i)\}$ be a fuzzy sensor stream, where $\overline{v_i} \in [0,1]$ denotes the membership degree of sample $s_i$ to a linguistic term. Temporal aggregation is defined as:
+\begin{equation}
+V \cup T(t^*) =
+\bigcup_{(v_i,t_i)\in V}
+\overline{v_i} \cap \overline{T}(\Delta t_i^*)
+\in [0,1].
+\end{equation}
+
+In this work, a weighted average aggregation is employed:
+\begin{equation}
+V_r \cup T_k(t^*) =
+\frac{\sum_{(v_i,t_i)\in V}
+\overline{v_i}\,\overline{T}(\Delta t_i^*)}
+{\sum \overline{T}(\Delta t_i^*)}.
+\end{equation}
+
+A fuzzy quantifier applies a membership function $\overline{Q}: [0,1] \rightarrow [0,1]$ to the aggregated degree, producing a scalar value that represents the linguistic intensity of the protoform:
+\begin{equation}
+P(S) = Q\!\left( V \cup T \right).
+\end{equation}
+
+Quantifiers model linguistic concepts such as \textit{few}, \textit{many}, and \textit{all}, enabling compact, interpretable summaries of temporal sensor behavior.
+
+\section*{Acknowledgments}
+This contribution has been supported by the Spanish Institute of Health ISCIII through the project DTS21-00047.
+
+
+\bibliographystyle{elsarticle-num}
+\bibliography{mi_bibliografia}
+\end{document}
+
+\endinput
+%%
+%% End of file `elsarticle-template-num.tex'.

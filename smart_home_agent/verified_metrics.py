@@ -54,7 +54,7 @@ def requested_interval(text: str, t0: str) -> tuple[datetime, datetime]:
     return start, end
 
 
-def verified_answer(user_text: str, t0: str, messages: list[dict], trace=None) -> str | None:
+def verified_answer(user_text: str, t0: str, messages: list[dict], trace=None, data_dir=None) -> str | None:
     kinds = metric_types(user_text)
     # Consejos generales de sueño no son consultas de duración personal.
     text = normalized(user_text)
@@ -76,7 +76,7 @@ def verified_answer(user_text: str, t0: str, messages: list[dict], trace=None) -
         if trace:
             trace('tool_call', {'name': 'query_aggregation', 'arguments': arguments})
         try:
-            result = query_aggregation(**arguments)
+            result = query_aggregation(**arguments, **({"data_file": data_dir} if data_dir is not None else {}))
             # No presentar cobertura incompleta como un total del intervalo.
             expected = int((end - start).total_seconds() // 60)
             if start.second or end.second or start.microsecond or end.microsecond or result['samples'] != expected:
@@ -94,9 +94,9 @@ def verified_answer(user_text: str, t0: str, messages: list[dict], trace=None) -
                 answers.append(f'Pasos registrados: {value:g}.')
             else:
                 hours, minutes = divmod(value, 60)
-                answers.append(f'Sueño registrado: {hours:g} h y {minutes:g} min.')
+                answers.append(f'Sueño registrado: {hours:g} horas y {minutes:g} minutos.')
         messages.append({'role': 'tool', 'tool_name': 'query_aggregation', 'content': json.dumps(result, ensure_ascii=False)})
-    return ' '.join(answers) + f' Intervalo consultado: [{start.isoformat()}, {end.isoformat()}).'
+    return ' '.join(answers) + f' Intervalo consultado: de {spoken_time(start)}{day_label(start, t0)} a {spoken_time(end)}{day_label(end, t0)}.'
 
 
 def guard_unverified_answer(content: str, user_text: str = '') -> str:
@@ -123,3 +123,18 @@ def guard_unverified_answer(content: str, user_text: str = '') -> str:
     if not removed:
         return content
     return ' '.join(kept).strip() or 'No tengo una medida verificada para afirmar eso.'
+
+
+def spoken_time(moment):
+    from .speech_text import spoken_clock
+    return spoken_clock(moment.hour, moment.minute)
+
+
+def day_label(moment, t0):
+    reference = datetime.fromisoformat(t0.replace('Z', '+00:00')).date()
+    days = (reference - moment.date()).days
+    if days == 0:
+        return ''
+    if days == 1:
+        return ' del día anterior'
+    return f' de hace {days} días'

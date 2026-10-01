@@ -356,7 +356,8 @@ class ReachyInterface(ConversationInterface):
         self.state = InterfaceState.SPEAKING
         await self.on_speaking()
         try:
-            clip = await self.tts.synthesize(text)
+            from ..speech_text import for_speech
+            clip = await self.tts.synthesize(for_speech(text))
             samples, rate = self._resample_for_reachy(clip)
             if self.tts_leading_silence_seconds:
                 import numpy as np
