@@ -56,7 +56,7 @@ Visión (entorno instalado según VISION_DEPLOYMENT.md y fotos de referencia en
 ```powershell
 cd C:\Users\Javier\Documents\GitHub\SmartEnviroments-AgentsIA
 & '.\.venv-vision\Scripts\python.exe' -u -m smart_home_agent.vision_service `
-  --host 192.168.0.28 --port 11436
+  --host 192.168.0.28 --port 11436 --threshold 0.5
 ```
 
 Si falta la regla de firewall, PowerShell como administrador, una vez:
@@ -94,7 +94,7 @@ Sin reconocimiento, puedes usar `--user javi` o `--user mariola` y el mismo
 
 ## Reconocimiento, voz y movimiento
 
-El umbral inicial es el de distancia coseno de DeepFace para Facenet512;
+El umbral de distancia coseno para Facenet512 es 0.5;
 se exige separación de 0.05 respecto al otro candidato y acuerdo de al menos
 dos de tres capturas. No se presenta la distancia como porcentaje de confianza.
 Debe calibrarse con imágenes ajenas a las referencias antes de uso real.

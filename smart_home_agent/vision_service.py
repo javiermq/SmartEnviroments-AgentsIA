@@ -64,7 +64,7 @@ class CaptureRing:
 
 
 class FaceEngine:
-    def __init__(self, directory: Path, model: str = "Facenet512", threshold: float | None = None, margin: float = 0.05, detector: str = "yunet"):
+    def __init__(self, directory: Path, model: str = "Facenet512", threshold: float | None = 0.5, margin: float = 0.05, detector: str = "yunet"):
         from deepface import DeepFace
 
         self.deepface, self.model = DeepFace, model
@@ -309,7 +309,7 @@ def main():
     parser.add_argument("--port", type=int, default=11436)
     parser.add_argument("--users-dir", type=Path, default=Path("vision_data/users"))
     parser.add_argument("--save-dir", type=Path, default=Path("temp_data/vision"))
-    parser.add_argument("--threshold", type=float, default=None, help="Umbral de distancia coseno; por defecto el de DeepFace")
+    parser.add_argument("--threshold", type=float, default=0.5, help="Umbral de distancia coseno (por defecto: 0.5)")
     parser.add_argument("--margin", type=float, default=0.05, help="Separación mínima entre candidatos")
     parser.add_argument("--detector", choices=["yunet", "opencv"], default="yunet", help="Detector común para referencias y capturas (yunet)")
     args = parser.parse_args()

@@ -24,7 +24,7 @@ con cada paso, distancias de identidad y puntuaciones de expresión.
    obtiene embeddings Facenet512 y calcula para cada imagen la menor distancia
    coseno a las referencias de cada usuario.
 6. Agrega por usuario la mediana de las distancias disponibles (mínimo 2).
-   Exige pasar el umbral de DeepFace, separación >= 0.05 respecto al siguiente
+   Exige pasar el umbral de distancia coseno de 0.5, separación >= 0.05 respecto al siguiente
    candidato y al menos 2 de 3 decisiones individuales coincidentes. En caso
    contrario devuelve `unknow`. Una captura ausente o fallida no aporta voto.
 7. Combina por mediana las puntuaciones de expresión y renormaliza a 100.
@@ -59,7 +59,7 @@ no podrá reconocerse. Reinicia el servidor cuando cambies las referencias;
 se calculan al arrancar, siempre con el mismo detector que las capturas.
 
 ```powershell
-& ".\.venv-vision\Scripts\python.exe" -u -m smart_home_agent.vision_service --host 0.0.0.0 --port 11436
+& ".\.venv-vision\Scripts\python.exe" -u -m smart_home_agent.vision_service --host 0.0.0.0 --port 11436 --threshold 0.5
 ```
 
 El primer arranque descarga los pesos de Facenet512, Emotion y YuNet en
