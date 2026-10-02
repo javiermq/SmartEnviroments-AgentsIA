@@ -278,6 +278,7 @@ class ReachyInterface(ConversationInterface):
     async def listen(self) -> str:
         if self.robot is None:
             raise RuntimeError("Reachy no está conectado.")
+        await asyncio.to_thread(self._discard_pending_audio)
         await self.on_listening()
         try:
             import numpy as np
@@ -329,6 +330,33 @@ class ReachyInterface(ConversationInterface):
             return ""
         self.state = InterfaceState.ACTIVE
         return text
+
+    def _discard_pending_audio(self) -> None:
+        """Descarta la cola acumulada durante STT, Ollama y la reproducción."""
+        media = self.robot.media
+        rate = media.get_input_audio_samplerate()
+        if rate <= 0:
+            raise AudioError("Frecuencia de entrada de Reachy inválida.")
+        deadline = time.monotonic() + 2.0
+        discarded_frames = 0
+        while time.monotonic() < deadline:
+            started = time.monotonic()
+            sample = media.get_audio_sample()
+            elapsed = time.monotonic() - started
+            if sample is None:
+                break
+            discarded_frames += len(sample)
+            # Algunos backends esperan el siguiente bloque en lugar de devolver
+            # None. Una lectura al ritmo de captura indica que alcanzamos audio
+            # en vivo; ese bloque también se descarta antes del turno nuevo.
+            if len(sample) and elapsed >= 0.8 * len(sample) / rate:
+                break
+        else:
+            # No transcribir audio antiguo si no logramos alcanzar la captura.
+            raise ListenTimeout("No se pudo vaciar el búfer de audio; se reintentará la escucha.")
+        if discarded_frames:
+            LOGGER.info("Audio pendiente descartado antes de escuchar: %.2f s",
+                        discarded_frames / rate)
 
     def _speech_detected(self, sample: object, rms_threshold: float) -> bool:
         """Usa DoA si está disponible; USB/DoA no debe derribar la conversación."""

@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 from .sensor_queries import query_aggregation
 from .context import system_prompt, DATA_DIR
+from .speech_text import strip_icons
 from pathlib import Path
 from .verified_metrics import verified_answer, guard_unverified_answer, metric_types, normalized
 
@@ -113,9 +114,9 @@ class ConversationBackend:
     @staticmethod
     def _visible_answer(content: str) -> str:
         if "</think>" in content:
-            return content.rsplit("</think>", 1)[-1].strip()
+            return strip_icons(content.rsplit("</think>", 1)[-1])
         if "<think>" in content:
             content = re.sub(r"<think>.*?</think>\\s*", "", content, flags=re.DOTALL)
             if "<think>" in content:
                 return ""
-        return content.strip()
+        return strip_icons(content)
