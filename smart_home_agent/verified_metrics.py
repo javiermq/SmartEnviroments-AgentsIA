@@ -45,6 +45,8 @@ def requested_interval(text: str, t0: str) -> tuple[datetime, datetime]:
         night = bool(re.search(r'\banoche\b|\b(?:esta|la|ultima) noche\b', text))
         explicit = text.replace('medianoche', '00:00').replace('media manana', '10:00')
         times = re.findall(r'\b(\d{1,2}):(\d{2})\b', explicit)
+        if re.search(r'\bnoche\b', text) and not night and not times:
+            raise ValueError('¿Te refieres a anoche? Di anoche o indica las dos horas que quieres consultar.')
         if times:
             if len(times) != 2:
                 raise ValueError('¿Entre qué dos horas? Por ejemplo, de nueve a diez de la mañana, o escribe 09:00 y 10:00.')

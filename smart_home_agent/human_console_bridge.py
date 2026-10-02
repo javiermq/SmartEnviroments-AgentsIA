@@ -292,6 +292,13 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_w
     from smart_home_agent.speech_text import for_speech
     sessions = UserSessions(ollama_url) if ollama_url else None
 
+    def python_trace(event, data):
+        labels = {'tool_call': 'llamada', 'tool_result': 'resultado', 'tool_error': 'error'}
+        if event in labels:
+            print(f"PYTHON {labels[event]}: {json.dumps(data, ensure_ascii=False)}", flush=True)
+        elif trace:
+            print(f"[TRACE] {event}: {json.dumps(data, ensure_ascii=False)}", flush=True)
+
     class BridgeHandler(BaseHTTPRequestHandler):
         server_version = "HumanConsoleBridge/1.0"
 
@@ -322,7 +329,9 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_w
                 if self.path == "/conversation":
                     if sessions is None:
                         raise ValueError("/conversation requiere --chat-mode ollama")
-                    response = sessions.respond(json.loads(body_in.decode("utf-8")))
+                    response = sessions.respond(
+                        json.loads(body_in.decode("utf-8")),
+                        python_trace)
                     status = HTTPStatus.OK
                     body = json.dumps(response, ensure_ascii=False).encode("utf-8")
                 elif self.path == "/stt":
@@ -392,7 +401,7 @@ def main() -> None:
     parser.add_argument("--chat-mode", choices=["human", "ollama", "automatic", "echo"], default="human")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/chat")
     parser.add_argument("--save-dir", default="temp_data", help="Directorio del anillo de 100 WAV de entrada")
-    parser.add_argument("--trace", action="store_true", help="Muestra solicitudes, tools y respuestas de Ollama")
+    parser.add_argument("--trace", action="store_true", help="Muestra llamadas Python, resultados de herramientas y trazas de Ollama")
     args = parser.parse_args()
     ollama_url = args.ollama_url if args.chat_mode == "ollama" else None
     tts = LocalTTS(args.tts_model)

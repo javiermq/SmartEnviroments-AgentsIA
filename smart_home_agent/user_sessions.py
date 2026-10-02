@@ -17,7 +17,7 @@ class UserSessions:
         self.sessions = {}
         self.lock = RLock()
 
-    def respond(self, payload):
+    def respond(self, payload, trace=None):
         if not isinstance(payload, dict):
             raise ValueError('El cuerpo debe ser un objeto JSON')
         user = user_id(payload.get('user'))
@@ -37,7 +37,14 @@ class UserSessions:
                                                           self.data_root / user), RLock())
             backend, session_lock = self.sessions[key]
         with session_lock:
-            return {'text': backend.respond(text), 'gesture': backend.last_gesture, 'user': user}
+            events = []
+            def record(event, data):
+                events.append({'event': event, 'data': data})
+                if trace:
+                    trace(event, data)
+            answer = backend.respond(text, record)
+            return {'text': answer, 'gesture': backend.last_gesture, 'user': user,
+                    'trace': events}
 
 
 class RemoteConversation:
@@ -55,5 +62,7 @@ class RemoteConversation:
             result = json.load(response)
         self.last_gesture = result.get('gesture')
         if trace:
+            for item in result.get('trace', []):
+                trace(item['event'], item['data'])
             trace('remote_response', result)
         return result['text']
