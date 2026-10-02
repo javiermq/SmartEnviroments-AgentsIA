@@ -52,6 +52,46 @@ async def circle(interface):
         await asyncio.to_thread(interface._idle_gesture)
 
 
+def recognition_chirp(sample_rate):
+    """Tres burbujas musicales a volumen bajo, con entrada y salida suaves."""
+    import numpy as np
+    notes = []
+    for frequency in (520, 660, 580):
+        t = np.arange(round(sample_rate * 0.075)) / sample_rate
+        phase = 2 * np.pi * (frequency * t + 450 * t * t)
+        notes.append(0.06 * np.sin(phase) * np.sin(np.pi * t / 0.075) ** 2)
+        notes.append(np.zeros(round(sample_rate * 0.025)))
+    return np.concatenate(notes).astype(np.float32)[:, None]
+
+
+async def recognition_sound(interface):
+    """Repite un sonido breve mientras se reconoce, sin bloquear la cámara."""
+    playback = None
+    audio_until = 0.0
+    loop = asyncio.get_running_loop()
+    try:
+        rate = interface.robot.media.get_output_audio_samplerate()
+        samples = recognition_chirp(rate)
+        while True:
+            playback = asyncio.create_task(asyncio.to_thread(
+                interface.robot.media.push_audio_sample, samples))
+            try:
+                await asyncio.shield(playback)
+            finally:
+                await playback
+                audio_until = loop.time() + len(samples) / rate
+            await asyncio.sleep(1.5)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logging.exception('No se pudo reproducir el sonido de reconocimiento')
+    finally:
+        if playback is not None:
+            await playback
+            # Deja acabar el fragmento encolado antes de saludar o cerrar media.
+            await asyncio.sleep(max(0.0, audio_until - loop.time()))
+
+
 async def run_recognized(interface, settings, args, trace):
     import cv2
     model = Path(args.detector_model)
@@ -82,12 +122,18 @@ async def run_recognized(interface, settings, args, trace):
     worker = threading.Thread(target=capture, daemon=True)
     worker.start()
     motion = None
+    sound = None
     current, backend, pending_identity = None, None, None
     listening = None
     event_task = None
 
     async def stop_motion():
-        nonlocal motion
+        nonlocal motion, sound
+        if sound:
+            sound.cancel()
+            with suppress(asyncio.CancelledError):
+                await sound
+            sound = None
         if motion:
             motion.cancel()
             with suppress(asyncio.CancelledError):
@@ -123,6 +169,7 @@ async def run_recognized(interface, settings, args, trace):
                         with suppress(asyncio.CancelledError):
                             await gesture
                     motion = asyncio.create_task(circle(interface))
+                    sound = asyncio.create_task(recognition_sound(interface))
                 elif kind == 'identity':
                     pending_identity = accepted_identity(result)
                 elif kind == 'finished':

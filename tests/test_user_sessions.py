@@ -3,12 +3,15 @@ import json
 import sys
 import tempfile
 import unittest
+import numpy as np
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, AsyncMock, patch
 
 from smart_home_agent.user_sessions import UserSessions
-from smart_home_agent.recognized_conversation import accepted_identity, circle, is_goodbye, run_recognized
+from smart_home_agent.recognized_conversation import (
+    accepted_identity, circle, is_goodbye, recognition_chirp, recognition_sound, run_recognized,
+)
 from smart_home_agent.speech_text import for_speech
 from smart_home_agent.human_console_bridge import make_handler
 
@@ -85,6 +88,22 @@ class SessionTests(unittest.TestCase):
 
 
 class MotionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_recognition_sound_is_soft_and_stops_before_greeting(self):
+        samples = recognition_chirp(24000)
+        self.assertEqual(samples.shape, (7200, 1))
+        self.assertEqual(samples.dtype, np.float32)
+        self.assertLessEqual(float(np.max(np.abs(samples))), 0.06)
+        self.assertGreater(float(np.max(np.abs(samples))), 0.01)
+        interface = SimpleNamespace(robot=Mock())
+        interface.robot.media.get_output_audio_samplerate.return_value = 24000
+        task = asyncio.create_task(recognition_sound(interface))
+        while not interface.robot.media.push_audio_sample.called:
+            await asyncio.sleep(0.005)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        interface.robot.media.push_audio_sample.assert_called_once()
+
     async def test_conversation_holds_identity_until_goodbye_then_recognizes_next_user(self):
         import time
         camera_passes = []
@@ -121,6 +140,7 @@ class MotionTests(unittest.IsolatedAsyncioTestCase):
                                     listen=listen, speak=AsyncMock(),
                                     on_thinking=AsyncMock(), set_response_gesture=Mock(),
                                     _idle_gesture=Mock())
+        interface.robot.media.get_output_audio_samplerate.return_value = 24000
         with tempfile.TemporaryDirectory() as directory:
             model = Path(directory) / 'model.onnx'
             model.touch()
