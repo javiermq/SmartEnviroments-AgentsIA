@@ -1,5 +1,9 @@
 # Smart Environments: consultas con OpenClaw
 
+La arquitectura con sesiones por usuario, voz separada y actualizaciones de
+sensores y HAR cada minuto está documentada en
+[entorno dinámico](docs/DYNAMIC_ENVIRONMENT.md).
+
 Este prototipo permite que un agente conversacional consulte dinámicamente el
 TSV simulado, empezando por las señales del reloj.
 

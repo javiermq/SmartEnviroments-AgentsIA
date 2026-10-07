@@ -48,9 +48,45 @@ class ConversationBackend:
         self.messages: list[dict[str, Any]] = [{"role": "system", "content": self._system_prompt(t0)}]
         self.last_gesture: dict[str, Any] | None = None
         self.last_metric_request: str | None = None
+        self.environment: dict | None = None
 
     def _system_prompt(self, t0: str) -> str:
-        return system_prompt(t0, self.data_dir)
+        return system_prompt(t0, self.data_dir, getattr(self, 'environment', None))
+
+    def update_environment(self, context: dict) -> None:
+        self.t0 = context['t0']
+        self.environment = context
+        self.messages[0]['content'] = self._system_prompt(self.t0)
+
+    def evaluate_environment(self) -> dict:
+        """El entorno es un evento del sistema, nunca palabras del usuario."""
+        self.messages[0]['content'] = self._system_prompt(self.t0)
+        self.messages.append({'role': 'system', 'content': (
+            'EVENTO ENVIRONMENT. Siendo la hora indicada en CONTEXTO_JSON, decide si los '
+            'cambios del ambiente aportan algo interesante a la conversación reciente. '
+            'user_turns_last_minute cuenta intervenciones reales del usuario, no sensores. '
+            'Puedes continuar el tema, abrir otro pertinente o guardar silencio. '
+            'No comentes cada actualización, no repitas preguntas ignoradas ni interrumpas '
+            'innecesariamente. Cero intervenciones no obliga a hablar. No inventes hechos '
+            'ni promesas de futuras acciones. Devuelve solo JSON con action="silent" '
+            'y text="", o action="speak" y una frase breve en text.')})
+        try:
+            response = self._request_ollama(decision=True)
+            decision = json.loads(self._visible_answer(response.get('content', '')))
+            if not isinstance(decision, dict) or decision.get('action') not in {'silent', 'speak'}:
+                raise ValueError('Decisión de entorno inválida')
+            text = decision.get('text', '')
+            if not isinstance(text, str):
+                raise ValueError('Texto de entorno inválido')
+            text = strip_icons(text)
+            if guard_unverified_answer(text) != text:
+                return {'action': 'silent', 'text': ''}
+            return {'action': 'speak' if decision['action'] == 'speak' and text else 'silent',
+                    'text': text if decision['action'] == 'speak' else ''}
+        except (ValueError, TypeError):
+            return {'action': 'silent', 'text': ''}
+        finally:
+            self.messages.pop()
 
     def respond(self, user_text: str, trace: TraceCallback | None = None) -> str:
         self.messages[0]["content"] = self._system_prompt(self.t0)
@@ -70,7 +106,7 @@ class ConversationBackend:
             return verified
         for round_number in range(1, 5):
             assistant = self._request_ollama()
-            assistant = {**assistant, "content": self._visible_answer(assistant.get("content", ""))}
+            assistant = {**assistant, 'role': 'assistant', "content": self._visible_answer(assistant.get("content", ""))}
             gesture = assistant.get("gesture")
             if isinstance(gesture, dict):
                 self.last_gesture = gesture
@@ -102,11 +138,16 @@ class ConversationBackend:
                 self.messages.append({"role": "tool", "tool_name": name, "content": content})
         return "Se alcanzó el límite de llamadas de herramienta para este turno."
 
-    def _request_ollama(self) -> dict[str, Any]:
+    def _request_ollama(self, decision: bool = False) -> dict[str, Any]:
         payload = {"model": self.model, "messages": self.messages, "tools": [TOOL_SCHEMA], "stream": False, "think": False, "options": {"num_ctx": 8192}}
+        if decision:
+            payload.pop('tools')
+            payload['format'] = {'type': 'object', 'properties': {
+                'action': {'type': 'string', 'enum': ['silent', 'speak']},
+                'text': {'type': 'string'}}, 'required': ['action', 'text'], 'additionalProperties': False}
         request = Request(self.ollama_url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
         try:
-            with urlopen(request, timeout=180) as response:
+            with urlopen(request, timeout=30 if decision else 180) as response:
                 return json.loads(response.read().decode("utf-8"))["message"]
         except URLError as exc:
             raise RuntimeError("No se puede conectar con Ollama en el puerto 11434.") from exc

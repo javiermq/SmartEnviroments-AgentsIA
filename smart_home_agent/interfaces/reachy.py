@@ -235,6 +235,7 @@ class ReachyInterface(ConversationInterface):
         self._gesture_task: asyncio.Task[object] | None = None
         self._response_antennas_deg: tuple[float, float] | None = None
         self._response_gesture_name = "predeterminado"
+        self.user_speaking = False
 
     def set_response_gesture(self, gesture: dict[str, Any] | None) -> None:
         """Acepta solo gestos de antenas pequeños procedentes del bridge/LLM."""
@@ -276,6 +277,12 @@ class ReachyInterface(ConversationInterface):
         await self.on_idle()
 
     async def listen(self) -> str:
+        try:
+            return await self._listen_turn()
+        finally:
+            self.user_speaking = False
+
+    async def _listen_turn(self) -> str:
         if self.robot is None:
             raise RuntimeError("Reachy no está conectado.")
         await asyncio.to_thread(self._discard_pending_audio)
@@ -302,6 +309,7 @@ class ReachyInterface(ConversationInterface):
                 while pre_roll and pre_roll_frames > max_pre_roll_frames:
                     pre_roll_frames -= len(pre_roll.popleft())
             if speech:
+                self.user_speaking = True
                 if not speech_started:
                     had_pre_roll = bool(pre_roll)
                     chunks.extend(pre_roll)

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .reachy_vision import run_camera
 from .user_sessions import RemoteConversation, user_id
+from .proactive import listen_with_environment
 
 
 def is_goodbye(text):
@@ -144,7 +145,7 @@ async def run_recognized(interface, settings, args, trace):
         while True:
             # Audio habilitado únicamente después de una identificación válida.
             if current and motion is None and listening is None:
-                listening = asyncio.create_task(interface.listen())
+                listening = asyncio.create_task(listen_with_environment(interface, backend))
             event_task = asyncio.create_task(events.get())
             waiting = [event_task] + ([listening] if listening else [])
             done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
@@ -182,6 +183,7 @@ async def run_recognized(interface, settings, args, trace):
                         current = recognized
                         backend = RemoteConversation(args.conversation_url, args.t0, current,
                                                      settings.ollama_model, args.session_id)
+                        await asyncio.to_thread(backend.activate)
                         permit.clear()
                         await interface.speak('Hola ' + ('Javi' if current == 'javi' else 'Mariola'))
                         logging.info('Modo conversación: %s; reconocimiento pausado', current)
@@ -198,6 +200,7 @@ async def run_recognized(interface, settings, args, trace):
             if not text:
                 continue
             if is_goodbye(text):
+                await asyncio.to_thread(backend.deactivate)
                 interface.set_response_gesture(None)
                 await interface.speak('Adiós ' + ('Javi' if current == 'javi' else 'Mariola'))
                 gesture = interface._gesture_task
@@ -219,6 +222,9 @@ async def run_recognized(interface, settings, args, trace):
             interface.set_response_gesture(backend.last_gesture)
             await interface.speak(answer)
     finally:
+        if backend is not None:
+            with suppress(OSError, RuntimeError, ValueError):
+                await asyncio.to_thread(backend.deactivate)
         if event_task and not event_task.done():
             event_task.cancel()
             with suppress(asyncio.CancelledError):

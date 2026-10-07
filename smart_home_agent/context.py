@@ -24,9 +24,9 @@ def parse_timestamp(value: str) -> datetime:
     return moment
 
 
-def build_context(t0: str, data_dir: Path = DATA_DIR) -> dict:
+def build_context(t0: str, data_dir: Path = DATA_DIR, history_hours: int = 12) -> dict:
     moment = parse_timestamp(t0)
-    window_start = moment - timedelta(hours=12)
+    window_start = moment - timedelta(hours=history_hours)
     with (data_dir / "user_context.json").open(encoding="utf-8-sig") as handle:
         user = json.load(handle)
     # Una muestra representa su minuto; no reutilizamos datos antiguos en huecos.
@@ -57,6 +57,7 @@ def build_context(t0: str, data_dir: Path = DATA_DIR) -> dict:
                             "start_time": max(start, window_start).isoformat(),
                             "end_time": min(end, moment).isoformat(),
                             "ongoing_at_t0": start <= moment < end})
+    environment_row = dict(sensors) if sensors is not None else None
     minute_sample = None
     if sensors is not None:
         minute_sample = {"timestamp": sensors["timestamp"], "duration_seconds": 60,
@@ -65,14 +66,16 @@ def build_context(t0: str, data_dir: Path = DATA_DIR) -> dict:
                          "distance_m_in_this_minute": sensors.pop("distance_m", None),
                          "sleep_indicator_0_or_1": sensors.pop("sleep", None)}
     return {"t0": moment.isoformat(), "user": user, "sensors_at_t0": sensors,
+            "environment_row": environment_row,
             "watch_minute_sample_NOT_TOTALS": minute_sample,
             "daily_totals": "No incluidos. Requieren query_aggregation ejecutada.",
             "current_activities": current, "history_start": window_start.isoformat(),
-            "activities_last_12h": history}
+            f"activities_last_{history_hours}h": history}
 
 
-def system_prompt(t0: str, data_dir: Path = DATA_DIR) -> str:
-    context = build_context(t0, data_dir)
+def system_prompt(t0: str, data_dir: Path = DATA_DIR, context: dict | None = None) -> str:
+    context = context if context is not None else build_context(t0, data_dir)
+    history_hours = 36 if 'activities_last_36h' in context else 12
     style = (data_dir / "agent_style.txt").read_text(encoding="utf-8-sig").strip()
     return f"""Eres un asistente doméstico conversacional. La hora de referencia es {t0}.
 Responde en español y sé breve. Usa el perfil para personalizar sin inventar hechos.
@@ -89,15 +92,19 @@ o por una actividad pasada registrada, sin presentar un plan como un hecho futur
 Los planes que cuenta el usuario son intenciones, no predicciones ni hechos confirmados.
 Para calcular pasos, distancia o minutos dormidos, llama a query_aggregation.
 watch_minute_sample_NOT_TOTALS es UNA muestra de 60 segundos, nunca un acumulado.
+environment_row es la fila completa de ese mismo minuto: steps y distance_m
+son valores de ese minuto; sleep es un indicador, nunca un total diario.
 steps_in_this_minute=5 significa cinco pasos en ese minuto, NO cinco pasos hoy.
 sleep_indicator_0_or_1 indica sueño en ese minuto, NO duración diaria.
-No calcules sueño a partir de activities_last_12h: está recortado y puede omitir la noche.
+No calcules sueño a partir del historial HAR: está recortado; consulta el reloj.
 No respondas cifras de pasos o sueño sin un resultado de query_aggregation.
 No ofrezcas consultar pasos o sueño si el usuario está hablando de otro tema.
 Si habla de cocina, responde sobre cocina; no desvíes el diálogo a los sensores.
 sport significa ejercicio registrado; no lo confundas con ausencia de ejercicio.
 Solo existen watch.steps, watch.distance_m y watch.sleep como herramientas de agregación.
 No dispones de temporizadores, alarmas, recordatorios ni avisos en segundo plano.
+Puedes recibir eventos de entorno y decidir si comentar la situación presente;
+esto no permite prometer acciones, recordatorios ni intervenciones futuras.
 Solo ofrece acciones que puedas realizar con las herramientas disponibles.
 No tienes herramientas para manipular objetos ni realizar tareas físicas.
 Puedes conversar y orientar, pero no atribuirte acciones físicas ni tiempos de ejecución.
@@ -115,7 +122,7 @@ Los sensores binarios usan 0=inactivo y 1=activo; las demás señales conservan 
 cercania_distance_* es adimensional: 1=máxima cercanía, 0=distancia de 10 m o más.
 Las muestras de sensores representan un minuto; null significa dato no disponible.
 Las actividades usan intervalos [inicio, fin); el historial está recortado a las últimas
-12 horas e incluye la parte transcurrida de la actividad actual. Una lista vacía significa
+{history_hours} horas e incluye la parte transcurrida de la actividad actual. Una lista vacía significa
 que no hay registros, no que el usuario no haya hecho nada. No predigas actividades futuras.
 El sueño registrado estima duración, no calidad clínica ni despertares.
 No inventes datos ni expliques razonamiento interno.

@@ -287,7 +287,7 @@ def forward_to_ollama(ollama_url: str, body: bytes, trace: bool) -> tuple[int, b
         raise RuntimeError(f"No se puede conectar con Ollama local ({ollama_url}): {exc}") from exc
 
 
-def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_wavs: ReceivedWavRing, ollama_url: str | None, automatic: bool, echo: bool, trace: bool) -> type[BaseHTTPRequestHandler]:
+def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_wavs: ReceivedWavRing, ollama_url: str | None, automatic: bool, echo: bool, trace: bool, voice_only: bool = False) -> type[BaseHTTPRequestHandler]:
     from smart_home_agent.user_sessions import UserSessions
     from smart_home_agent.speech_text import for_speech
     sessions = UserSessions(ollama_url) if ollama_url else None
@@ -317,7 +317,11 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_w
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path not in ("/api/chat", "/stt", "/tts", "/conversation"):
+            if voice_only and self.path not in ('/stt', '/tts'):
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            if self.path not in ("/api/chat", "/stt", "/tts", "/conversation",
+                                 '/activate', '/deactivate', '/events', '/spoken', '/environment'):
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             try:
@@ -326,7 +330,16 @@ def make_handler(console: HumanConsole, stt: LocalSTT, tts: LocalTTS, received_w
                     raise ValueError("Content-Length inválido")
                 body_in = self.rfile.read(length)
                 content_type = "application/json; charset=utf-8"
-                if self.path == "/conversation":
+                if self.path in ('/activate', '/deactivate', '/events', '/spoken', '/environment'):
+                    if sessions is None:
+                        raise ValueError('Esta ruta requiere --chat-mode ollama')
+                    routes = {'/activate': sessions.activate, '/deactivate': sessions.deactivate,
+                              '/events': sessions.events, '/spoken': sessions.spoken,
+                              '/environment': sessions.environment}
+                    response = routes[self.path](json.loads(body_in.decode('utf-8')))
+                    status = HTTPStatus.OK
+                    body = json.dumps(response, ensure_ascii=False).encode('utf-8')
+                elif self.path == "/conversation":
                     if sessions is None:
                         raise ValueError("/conversation requiere --chat-mode ollama")
                     response = sessions.respond(
@@ -402,19 +415,22 @@ def main() -> None:
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/chat")
     parser.add_argument("--save-dir", default="temp_data", help="Directorio del anillo de 100 WAV de entrada")
     parser.add_argument("--trace", action="store_true", help="Muestra llamadas Python, resultados de herramientas y trazas de Ollama")
+    parser.add_argument('--service', choices=['bridge', 'voice'], default='bridge',
+                        help='voice sirve solo STT y TTS; el conversor se ejecuta aparte')
     args = parser.parse_args()
-    ollama_url = args.ollama_url if args.chat_mode == "ollama" else None
+    ollama_url = args.ollama_url if args.chat_mode == "ollama" and args.service != 'voice' else None
     tts = LocalTTS(args.tts_model)
     if args.tts_model:
         tts.warm()
     received_wavs = ReceivedWavRing(Path(args.save_dir), SAVE_SIZE_SAMPLES)
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), tts, received_wavs, ollama_url, args.chat_mode == "automatic", args.chat_mode == "echo", args.trace))
-    print(f"Human Console Bridge escuchando en http://{args.host}:{args.port}/api/chat")
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(HumanConsole(), LocalSTT(args.stt_model, args.stt_device), tts, received_wavs, ollama_url, args.chat_mode == "automatic", args.chat_mode == "echo", args.trace, voice_only=args.service == 'voice'))
+    print(f"Servicio {args.service} escuchando en http://{args.host}:{args.port}")
     print(f"STT local disponible en http://{args.host}:{args.port}/stt ({args.stt_model}, {args.stt_device})")
     print(f"WAV recibidos: {received_wavs.directory.resolve()} (anillo de {SAVE_SIZE_SAMPLES})")
     print(f"TTS local disponible en http://{args.host}:{args.port}/tts ({args.tts_model or 'sin voz configurada'})")
     chat_status = "Ollama local en " + ollama_url if ollama_url else ({"automatic": "respuesta automática aleatoria", "echo": "eco del texto transcrito"}.get(args.chat_mode, "respuesta humana por consola"))
-    print(f"Chat: {chat_status}")
+    if args.service != 'voice':
+        print(f"Chat: {chat_status}")
     print("Ctrl+C para detenerlo. No lo expongas a Internet.")
     try:
         server.serve_forever()

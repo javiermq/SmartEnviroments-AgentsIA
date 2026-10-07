@@ -66,8 +66,8 @@ class SessionTests(unittest.TestCase):
             self.assertIn('6.', ask('javi')['text'])
             self.assertIn('16.', ask('mariola')['text'])
             self.assertIn('6.', ask('Javi')['text'])
-            javi = service.sessions[('reachy', 'javi', T0, 'qwen3:4b-instruct-2507-q4_K_M')][0]
-            mariola = service.sessions[('reachy', 'mariola', T0, 'qwen3:4b-instruct-2507-q4_K_M')][0]
+            javi = service.sessions[('reachy', 'javi')].backend
+            mariola = service.sessions[('reachy', 'mariola')].backend
             self.assertEqual(sum(m['role'] == 'user' for m in javi.messages), 2)
             self.assertEqual(sum(m['role'] == 'user' for m in mariola.messages), 1)
             self.assertNotIn('mariola', javi.messages[0]['content'])
@@ -148,7 +148,9 @@ class MotionTests(unittest.IsolatedAsyncioTestCase):
                                    conversation_url='unused', t0=T0, session_id='robot')
             backends = []
             def remote(endpoint, t0, user, model_name, session):
-                backend = SimpleNamespace(respond=Mock(return_value='Respuesta'), last_gesture=None)
+                backend = SimpleNamespace(respond=Mock(return_value='Respuesta'), last_gesture=None,
+                                          activate=Mock(), deactivate=Mock(),
+                                          poll=Mock(return_value={'action': 'silent'}), accept=Mock())
                 backends.append((user, backend))
                 return backend
             with patch.dict(sys.modules, {'cv2': SimpleNamespace(FaceDetectorYN=Mock())}), \

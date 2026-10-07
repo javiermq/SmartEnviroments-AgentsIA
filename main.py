@@ -56,9 +56,15 @@ async def run(args: argparse.Namespace) -> None:
             from smart_home_agent.recognized_conversation import run_recognized
             await run_recognized(interface, settings, args, trace_to_console if args.trace else None)
             return
+        if args.conversation_url:
+            await asyncio.to_thread(backend.activate)
         while True:
             try:
-                user_text = await interface.listen()
+                if args.conversation_url and interface_name == 'reachy':
+                    from smart_home_agent.proactive import listen_with_environment
+                    user_text = await listen_with_environment(interface, backend)
+                else:
+                    user_text = await interface.listen()
             except KeyboardInterrupt:
                 break
             except (RuntimeError, TimeoutError) as exc:
@@ -75,6 +81,10 @@ async def run(args: argparse.Namespace) -> None:
                 interface.set_response_gesture(backend.last_gesture)
             await interface.speak(response)
     finally:
+        if args.conversation_url and not args.face_recognition:
+            from contextlib import suppress
+            with suppress(OSError, RuntimeError, ValueError):
+                await asyncio.to_thread(backend.deactivate)
         await interface.close()
         print("[Sesión cerrada]")
 

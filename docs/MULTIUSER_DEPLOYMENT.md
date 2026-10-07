@@ -1,5 +1,9 @@
 # Javi y Mariola: conversación y reconocimiento en paralelo
 
+Para las sesiones vivas con sensores y HAR actualizados cada minuto, usa el
+[arranque con voz, conversor y entorno separados](DYNAMIC_ENVIRONMENT.md).
+Los comandos de puente integrado de abajo se mantienen para la demo anterior.
+
 El servidor Windows mantiene STT, TTS y las sesiones de conversación en el
 puerto 11435; Ollama escucha localmente en 11434. El servidor DeepFace es otro
 proceso en 11436. En Reachy se ejecuta **solo main.py con --face-recognition**:
@@ -25,7 +29,7 @@ Los archivos de la raíz se conservan para las demos y CLI anteriores.
 `POST /conversation` recibe `user`, `session_id`, `t0`, `model` y `text`.
 El servidor usa la carpeta del usuario, tanto para el prompt como para las
 consultas verificadas y las herramientas del modelo. El historial se guarda
-por `(session_id, user, t0, model)`, con bloqueo por sesión. Cambiar de usuario
+por `(session_id, user)`, con modelo fijado y bloqueo por sesión. Cambiar de usuario
 no borra el historial del anterior. Identificadores desconocidos se rechazan.
 Las sesiones viven en memoria y se borran al reiniciar el puente. Usa un
 `--session-id` diferente para cada robot o cliente independiente.
