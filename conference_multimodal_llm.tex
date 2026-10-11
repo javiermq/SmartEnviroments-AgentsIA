@@ -1,0 +1,368 @@
+\documentclass[10pt,twocolumn]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage[a4paper,margin=2cm]{geometry}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+\title{A Multimodal Sensor--HAR--Language Architecture for Goal-Aware User Interaction in Edge--Fog Smart Environments}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Context-aware user interaction in smart environments requires sensor observations to be interpreted in relation to human activities, spatial context, and individual goals. This white paper organizes multimodal sensor integration, human activity recognition (HAR), contextual localization, temporal context segmentation, user goals, and language-based interaction into an open, adaptable sensor--HAR--language reference architecture. Sensor observations, activity estimates, and spatial information are aligned temporally and segmented into context episodes that capture relevant changes. A large language model (LLM) interprets these episodes alongside explicit user goals and preferences to support context-grounded assistance. Edge devices acquire and preprocess observations, while a local fog node integrates context and hosts language-model inference. The architecture accommodates different sensing technologies, interaction devices, and deployment configurations.
+
+The proposed shared-apartment implementation combines ultra-wideband (UWB) localization, binary ambient sensors, Android Wear, Reachy Mini, and locally deployed Qwen3 4B Instruct 2507. A single-participant evaluation in a real residential setting is planned to assess contextual consistency, temporal segmentation, sensor-grounded interpretation, goal alignment, and interaction latency.
+\end{abstract}
+
+\noindent\textbf{Keywords:} multimodal sensing; large language models; human activity recognition; contextual localization; temporal context segmentation; user goals; edge--fog computing; smart environments.
+
+
+\section{Introduction}
+
+Smart environments combine ambient sensors, wearable devices, and computational services to analyse everyday activities and support people in their living spaces~\cite{cook2007smart}. Wearables provide a mobile interface for sensing and interaction, while social robots offer an embodied channel for assistance; research on healthcare robots highlights the importance of user acceptance in their deployment~\cite{broadbent2009acceptance}. Edge--fog architectures provide a complementary computational foundation by placing processing closer to sensor sources, with latency, bandwidth, privacy, and resource constraints shaping deployment choices~\cite{shi2016edge}. Integrating these components creates opportunities for assistance informed by daily routines, mobility, and the context in which an interaction takes place.
+
+Human activity recognition (HAR) provides an intermediate layer between physical measurements and contextual interpretation. Its processing chain encompasses acquisition, preprocessing, segmentation, feature extraction, and classification~\cite{bulling2014tutorial}. Two complementary approaches can support this interpretation. Data-driven methods learn activity patterns from sensor observations: for example, convolutional and recurrent neural networks can learn features and temporal dependencies from multimodal wearable data~\cite{ordonez2016deep}. Knowledge-driven methods encode domain concepts and relationships explicitly, using rules, ontologies, or other semantic representations. Knowledge graphs and fuzzy logic have been combined to derive interpretable indicators of daily behaviour from heterogeneous sensor streams~\cite{polo2025health}. These approaches offer different ways to connect sensor observations with meaningful descriptions, which must then be integrated with the wider context of the user.
+
+Spatial information complements activity estimates, particularly in shared homes where ambient sensor events cannot readily be attributed to a specific resident~\cite{liu2007positioning,poloMultiOccupancy}. Ultra-wideband (UWB) localisation can help associate nearby users with environmental events and characterise caregiver proximity~\cite{polo2024social}. Its integration into consumer smartwatches also provides a basis for wearable contextual sensing, subject to practical accuracy, latency, and battery constraints~\cite{anguita2025uwb}. Combining wearable and ambient observations with interaction devices such as social robots therefore requires a shared representation of who is present, what activity is inferred, and how the context changes over time. Social robots can use this context to support personalised activities and adapt how they engage users. For example, Sorrentino et al., including Laura Fiorini and Filippo Cavallo, investigated engagement with personalised activities delivered by the CloudIA robot in two nursing facilities, highlighting the relevance of user perception and personalisation in socially assistive robotics~\cite{sorrentino2023cloudia}.
+
+However, sensing and activity recognition alone do not determine how personalised assistance should be delivered. Observations must be interpreted in relation to the person, the environment, and the purpose of an interaction~\cite{dey2001context}. Large language models (LLMs) introduce an emerging route towards connecting sensor-derived information with language: SensorLLM, for example, aligns motion-sensor time series with textual descriptions for HAR~\cite{li2025sensorllm}. In embodied agents, SayCan and ReAct demonstrate complementary ways of connecting language-based reasoning to available capabilities and external information~\cite{ahn2022saycan,yao2023react}. Within smart environments, Polo-Rodr{\'i}guez et al.~\cite{polo2025chatbots} combine UWB localisation and HAR with an LLM-powered chatbot to generate context-aware interactions and recommendations. These developments motivate further investigation of LLMs for context-aware assistance, while leaving open how reliably they can support continuous interaction in residential settings.
+
+Continuous goal-oriented coaching builds on research into sustained conversational support and context-adaptive interventions. Bickmore et al.~\cite{bickmore2013interventions} investigated daily interactions with conversational agents to support physical activity and dietary behaviour over two months. Complementarily, the just-in-time adaptive intervention framework relates intervention decisions to changing individual and contextual states, with explicit decision points, tailoring variables, intervention options, and decision rules~\cite{nahumshani2018jitai}. These studies motivate linking user goals with evolving contextual information when deciding whether, when, and how to provide support. For the architecture proposed here, a shared contextual representation connects multimodal sensing, temporal interpretation, and language-based assistance. In this work, context episodes organise temporally aligned observations, activity estimates, and spatial information around relevant changes. These episodes provide the evidence that an LLM interprets alongside user goals and preferences, allowing contextual consistency and goal alignment to be assessed explicitly.
+
+This paper proposes an open, adaptable sensor--HAR--language reference architecture for goal-aware user interaction in edge--fog smart environments. Edge devices acquire and preprocess heterogeneous observations, while a local fog node integrates context, segments it into episodes, and hosts language-model inference. The architecture separates sensing, HAR, contextual localisation, temporal segmentation, goal representation, and interaction, allowing different sensing technologies and interaction devices to be incorporated within a common processing flow.
+
+The main contributions are as follows:
+\begin{itemize}
+    \item We define a reference architecture linking multimodal sensing and HAR to language-based interaction through temporally organised context episodes.
+    \item We incorporate explicit user goals and preferences into episode interpretation to support continuous goal-oriented assistance, with goal alignment and sensor consistency as evaluation dimensions.
+    \item We describe a proposed shared-apartment implementation combining UWB localisation, binary ambient sensors, Android Wear, Reachy Mini, and locally deployed Qwen3 4B Instruct 2507, together with a planned single-participant evaluation of contextual consistency, temporal segmentation, sensor-grounded interpretation, goal alignment, and interaction latency.
+\end{itemize}
+This initial evaluation is intended to assess feasibility and integration limitations; broader conclusions about effectiveness and generalisation will require subsequent studies.
+
+% BibTeX references for the Introduction (copy the entries into your .bib file).
+% Verified publication metadata from publisher records and Crossref.
+% Existing citation keys retained; publication years are given in the year fields.
+% @inproceedings{anguita2025uwb,
+%   author = {Anguita-Molina, Miguel {\'A}ngel and Soto-Hidalgo, Jose Manuel and Medina-Quero, Javier and Polo-Rodr{\'i}guez, Aurora},
+%   title = {Evaluation of Edge-Based {UWB} Indoor Positioning Using Smartwatches and Embedded Anchors},
+%   year = {2026},
+%   booktitle = {Proceedings of the International Conference on Ubiquitous Computing and Ambient Intelligence (UCAmI 2025), Volume 1},
+%   series = {Lecture Notes in Networks and Systems},
+%   volume = {1818},
+%   publisher = {Springer},
+%   address = {Cham},
+%   pages = {339--350},
+%   doi = {10.1007/978-3-032-16992-1_32},
+%   url = {https://doi.org/10.1007/978-3-032-16992-1_32}
+% }
+%
+% @inproceedings{polo2024social,
+%   author = {Polo-Rodr{\'i}guez, Aurora and Anguita-Molina, Miguel {\'A}. and Gil, David and Romero, Jose and Fern{\'a}ndez, Elena and Paloma, Olga and Porcel, Ana and Medina-Quero, Javier},
+%   title = {Discovering Social Interactions Between Caregivers and Frail Individuals Using Indoor Localization},
+%   year = {2024},
+%   booktitle = {Proceedings of the International Conference on Ubiquitous Computing and Ambient Intelligence (UCAmI 2024)},
+%   series = {Lecture Notes in Networks and Systems},
+%   volume = {1212},
+%   publisher = {Springer},
+%   address = {Cham},
+%   pages = {319--331},
+%   doi = {10.1007/978-3-031-77571-0_31},
+%   url = {https://doi.org/10.1007/978-3-031-77571-0_31}
+% }
+%
+% @article{polo2025health,
+%   author = {Polo-Rodr{\'i}guez, Aurora and L{\'o}pez, Isabel Valenzuela and Diaz, Raquel and Rivadeneyra, Almudena and Gil, David and Medina-Quero, Javier},
+%   title = {Modelling Key Health Indicators from Sensor Data Using Knowledge Graphs and Fuzzy Logic},
+%   year = {2025},
+%   journal = {Electronics},
+%   volume = {14},
+%   number = {12},
+%   pages = {2459},
+%   doi = {10.3390/electronics14122459},
+%   url = {https://doi.org/10.3390/electronics14122459}
+% }
+%
+% @article{poloMultiOccupancy,
+%   author = {Polo-Rodr{\'i}guez, Aurora and Cavallo, Filippo and Nugent, Chris and Medina-Quero, Javier},
+%   title = {Human activity mining in multi-occupancy contexts based on nearby interaction under a fuzzy approach},
+%   year = {2024},
+%   journal = {Internet of Things},
+%   volume = {25},
+%   pages = {101018},
+%   doi = {10.1016/j.iot.2023.101018},
+%   url = {https://doi.org/10.1016/j.iot.2023.101018}
+% }
+
+
+% External references for the Introduction (copy without the leading percent signs).
+% @article{cook2007smart,
+%   author = {Cook, Diane J. and Das, Sajal K.},
+%   title = {How Smart Are Our Environments? An Updated Look at the State of the Art},
+%   journal = {Pervasive and Mobile Computing},
+%   year = {2007}, volume = {3}, number = {2}, pages = {53--73},
+%   doi = {10.1016/j.pmcj.2006.12.001}
+% }
+%
+% @article{dey2001context,
+%   author = {Dey, Anind K.},
+%   title = {Understanding and Using Context},
+%   journal = {Personal and Ubiquitous Computing},
+%   year = {2001}, volume = {5}, number = {1}, pages = {4--7},
+%   doi = {10.1007/s007790170019}
+% }
+%
+% @article{bulling2014tutorial,
+%   author = {Bulling, Andreas and Blanke, Ulf and Schiele, Bernt},
+%   title = {A Tutorial on Human Activity Recognition Using Body-Worn Inertial Sensors},
+%   journal = {ACM Computing Surveys},
+%   year = {2014}, volume = {46}, number = {3},
+%   pages = {33:1--33:33}, numpages = {33}, doi = {10.1145/2499621}
+% }
+%
+% @article{liu2007positioning,
+%   author = {Liu, Hui and Darabi, Houshang and Banerjee, Pat and Liu, Jing},
+%   title = {Survey of Wireless Indoor Positioning Techniques and Systems},
+%   journal = {IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews)},
+%   year = {2007}, volume = {37}, number = {6}, pages = {1067--1080},
+%   doi = {10.1109/TSMCC.2007.905750}
+% }
+%
+% @article{shi2016edge,
+%   author = {Shi, Weisong and Cao, Jie and Zhang, Quan and Li, Youhuizi and Xu, Lanyu},
+%   title = {Edge Computing: Vision and Challenges},
+%   journal = {IEEE Internet of Things Journal},
+%   year = {2016}, volume = {3}, number = {5}, pages = {637--646},
+%   doi = {10.1109/JIOT.2016.2579198}
+% }
+%
+% @inproceedings{ahn2022saycan,
+%   author = {Ichter, Brian and Brohan, Anthony and Chebotar, Yevgen and Finn, Chelsea and Hausman, Karol and Herzog, Alexander and Ho, Daniel and Ibarz, Julian and Irpan, Alex and Jang, Eric and Julian, Ryan and Kalashnikov, Dmitry and Levine, Sergey and Lu, Yao and Parada, Carolina and Rao, Kanishka and Sermanet, Pierre and Toshev, Alexander T and Vanhoucke, Vincent and Xia, Fei and Xiao, Ted and Xu, Peng and Yan, Mengyuan and Brown, Noah and Ahn, Michael and Cortes, Omar and Sievers, Nicolas and Tan, Clayton and Xu, Sichun and Reyes, Diego and Rettinghouse, Jarek and Quiambao, Jornell and Pastor, Peter and Luu, Linda and Lee, Kuang-Huei and Kuang, Yuheng and Jesmonth, Sally and Joshi, Nikhil J. and Jeffrey, Kyle and Ruano, Rosario Jauregui and Hsu, Jasmine and Gopalakrishnan, Keerthana and David, Byron and Zeng, Andy and Fu, Chuyuan Kelly},
+%   title = {Do As I Can, Not As I Say: Grounding Language in Robotic Affordances},
+%   booktitle = {Proceedings of The 6th Conference on Robot Learning},
+%   year = {2023}, volume = {205}, pages = {287--318},
+%   series = {Proceedings of Machine Learning Research}, publisher = {PMLR},
+%   url = {https://proceedings.mlr.press/v205/ichter23a.html}
+% }
+%
+% @inproceedings{yao2023react,
+%   author = {Yao, Shunyu and Zhao, Jeffrey and Yu, Dian and Du, Nan and Shafran, Izhak and Narasimhan, Karthik and Cao, Yuan},
+%   title = {{ReAct}: Synergizing Reasoning and Acting in Language Models},
+%   booktitle = {International Conference on Learning Representations},
+%   year = {2023}, url = {https://openreview.net/forum?id=WE_vluYUL-X}
+% }
+
+
+% Additional references for the revised Introduction.
+% @article{ordonez2016deep,
+%   author = {Ord{\'o}{\~n}ez, Francisco Javier and Roggen, Daniel},
+%   title = {Deep Convolutional and {LSTM} Recurrent Neural Networks for Multimodal Wearable Activity Recognition},
+%   journal = {Sensors}, year = {2016}, volume = {16}, number = {1}, pages = {115},
+%   doi = {10.3390/s16010115}
+% }
+%
+% @article{broadbent2009acceptance,
+%   author = {Broadbent, Elizabeth and Stafford, Rebecca and MacDonald, Bruce},
+%   title = {Acceptance of Healthcare Robots for the Older Population: Review and Future Directions},
+%   journal = {International Journal of Social Robotics},
+%   year = {2009}, volume = {1}, number = {4}, pages = {319--330},
+%   doi = {10.1007/s12369-009-0030-6}
+% }
+%
+% @inproceedings{li2025sensorllm,
+%   author = {Li, Zechen and Deldari, Shohreh and Chen, Linyao and Xue, Hao and Salim, Flora D.},
+%   title = {{SensorLLM}: Aligning Large Language Models with Motion Sensors for Human Activity Recognition},
+%   booktitle = {Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing},
+%   year = {2025}, pages = {354--379}, address = {Suzhou, China},
+%   publisher = {Association for Computational Linguistics},
+%   doi = {10.18653/v1/2025.emnlp-main.19},
+%   url = {https://aclanthology.org/2025.emnlp-main.19/}
+% }
+
+% References added for social robotics and continuous coaching.
+% @misc{sorrentino2023cloudia,
+%   author = {Sorrentino, Alessandra and Fiorini, Laura and {La Viola}, Carlo and Cavallo, Filippo},
+%   title = {Measuring the Perception of the Personalized Activities with {CloudIA} Robot},
+%   year = {2023}, eprint = {2312.06481}, archivePrefix = {arXiv}, primaryClass = {cs.RO},
+%   doi = {10.48550/arXiv.2312.06481}, url = {https://arxiv.org/abs/2312.06481}
+% }
+%
+% @misc{polo2025chatbots,
+%   author = {Polo-Rodr{\'i}guez, Aurora and Fiorini, Laura and Rovini, Erika and Cavallo, Filippo and Medina-Quero, Javier},
+%   title = {Enhancing Smart Environments with Context-Aware Chatbots using Large Language Models},
+%   year = {2025}, eprint = {2502.14469}, archivePrefix = {arXiv}, primaryClass = {cs.CL},
+%   doi = {10.48550/arXiv.2502.14469}, url = {https://arxiv.org/abs/2502.14469}
+% }
+%
+% @article{bickmore2013interventions,
+%   author = {Bickmore, Timothy W. and Schulman, Daniel and Sidner, Candace},
+%   title = {Automated Interventions for Multiple Health Behaviors Using Conversational Agents},
+%   journal = {Patient Education and Counseling},
+%   year = {2013}, volume = {92}, number = {2}, pages = {142--148},
+%   doi = {10.1016/j.pec.2013.05.011}
+% }
+%
+% @article{nahumshani2018jitai,
+%   author = {Nahum-Shani, Inbal and Smith, Shawna N. and Spring, Bonnie J. and Collins, Linda M. and Witkiewitz, Katie and Tewari, Ambuj and Murphy, Susan A.},
+%   title = {Just-in-Time Adaptive Interventions ({JITAIs}) in Mobile Health: Key Components and Design Principles for Ongoing Health Behavior Support},
+%   journal = {Annals of Behavioral Medicine},
+%   year = {2018}, volume = {52}, number = {6}, pages = {446--462},
+%   doi = {10.1007/s12160-016-9830-8}
+% }
+
+
+\section{Reference Architecture}
+\label{sec:reference-architecture}
+\subsection{Reference Architecture for AI-Enabled Smart Environments}
+\label{subsec:general-architecture}
+
+In this section, we propose a technology-independent architecture that provides a conceptual framework for connecting everyday-life sensing with contextual interaction and assistance. It follows a layered model with a closed feedback loop: a connected-device layer comprising sensors and actuators; an activity and spatial-context layer providing localisation and HAR services across edge--fog nodes; and a behavioural analysis layer assessing routines, deviations, and goal progress through AI-based supervision and human judgement. Observations are transformed into contextual episodes that inform intervention decisions, which return to interaction devices and household actuators. The architecture specifies functional components and interfaces, while individual deployments select devices, inference methods, and assistance policies according to their requirements.
+
+\paragraph{Connected devices: sensors and actuators.}
+In the environmental context, sensing provides the primary evidence about the home and its occupants. Ambient binary sensors capture events such as movement, door opening, bed occupancy, or object use. They can communicate through low-power networks such as Zigbee or Z-Wave, integrated through gateways or compatible radio controllers with home-automation platforms such as Home Assistant~\cite{homeassistantZha,homeassistantZwave}. Complementary multimodal sources include RGB or depth cameras, thermal sensors, and microphones connected over Wi-Fi or wired networks, with audio and video streams transported using protocols such as RTP where supported~\cite{schulzrinne2003rtp}. These modalities differ in the activity and occupancy information they provide and in their privacy implications; no single modality is mandatory. Device adapters expose timestamped observations with source identifiers, units or event types, and availability and quality indicators, keeping missing measurements distinguishable from observed inactivity.
+
+In the user context, wearable devices complement ambient sensing with wearer-associated observations, including inertial measurements, activity indicators, available physiological signals, and radio-based ranging or proximity. They also provide interaction through displays, speech, or haptic feedback. Social or companion robots combine these sensing and interaction roles within an embodied platform that can integrate cameras, microphones, actuators, and onboard processing. They contribute observations and deliver assistance through dialogue or gestures, supporting personalised activities as explored in socially assistive robotics~\cite{sorrentino2023cloudia}. Household devices such as lighting, audible indicators, displays, and compatible appliance controllers extend the available actuation channels.
+
+A communication middleware connects these heterogeneous devices to the processing services through asynchronous event exchange and explicit service interfaces. Publish/subscribe messaging, for example through MQTT~\cite{oasis2019mqtt}, enables services to subscribe to sensor observations, device-state changes, and alarm events. Cross-platform middleware such as ZeroC Ice, including its IceStorm publish/subscribe service, provides another option for distributing events among components~\cite{zerocIcestorm}. These mechanisms support timely data exchange, with achievable latency depending on network and deployment conditions. Separate interfaces for observations, commands, and acknowledgements allow higher layers to trigger interaction or actuation and receive device feedback without depending on device-specific protocols.
+
+\paragraph{Edge--fog processing foundation.}
+Edge nodes acquire, timestamp, filter, and, where appropriate, extract features from nearby sources. A fog node coordinates local services, aligns heterogeneous streams, and maintains contextual state~\cite{shi2016edge}. Processing placement depends on computational resources, connectivity, response-time requirements, and data sensitivity. For example, an edge node may transmit visual tracks or acoustic events rather than continuous recordings. Common interfaces allow services to exchange observations, estimates, and events regardless of their physical placement. Each estimate retains its observation interval, provenance, and confidence or quality information when provided by the underlying method.
+
+\paragraph{Localisation layer.}
+Localisation services describe occupant presence, position, zones, and proximity to relevant objects or people. Non-visual options include Bluetooth Low Energy (BLE) fingerprinting or proximity estimation~\cite{faragher2015ble}, and UWB ranging combined with positioning algorithms~\cite{dardari2009ranging}. Visual alternatives can use person detection and multi-object tracking, for example association-based tracking such as ByteTrack~\cite{zhang2022bytetrack}. Visual tracks require spatial calibration to support physical coordinates or semantic zones, and track identifiers do not automatically establish personal identity. Radio tags likewise require an explicit association with their wearer. The common output therefore distinguishes position, track identity, and confirmed user identity, while preserving uncertainty and temporary tracking loss. Deployments can use either family of methods or fuse their estimates.
+
+\paragraph{Human activity recognition layer.}
+HAR services transform ambient, wearable, and optional robot-derived observations into activity estimates. Data-driven implementations learn patterns from examples, using statistical classifiers or temporal neural models~\cite{ordonez2016deep}. Knowledge-driven implementations relate observations to activity concepts through explicit rules, fuzzy logic, or semantic models~\cite{polo2025health}. Hybrid implementations may combine learned estimates with contextual constraints. Localisation can support user attribution and spatial interpretation, but HAR can also operate on wearable or ambient streams independently. Outputs include the activity, relevant user or unresolved attribution, temporal interval, and supporting evidence. Unknown, conflicting, or weakly supported activities remain explicit rather than being forced into a confident label.
+
+\paragraph{Contextual supervision and shared decision-making.}
+Above localisation and HAR, the supervisory layer maintains a temporal account of activities, events, and spatial relations. Streams are aligned and grouped into context episodes that record relevant changes, their duration, and their evidence. Supervision covers ongoing activities, predefined alarm conditions, departures from individual routines, caregiver notifications, and progress towards user-defined quality-of-life goals. A deviation is assessed against an explicitly defined baseline and observation coverage; it is a reason for further assessment rather than an automatic diagnosis. Goals can describe desired routines, mobility, or participation, with criteria and preferences agreed with the user and, where appropriate, caregivers.
+
+AI services and humans jointly interpret this information. An LLM can explain an episode, request clarification, suggest a goal-related action, or prepare a caregiver-facing summary. Context-aware chatbots provide a precedent for connecting location and HAR to language-based interaction~\cite{polo2025chatbots}. Users and caregivers can correct interpretations, refine goals, acknowledge alerts, or decide on escalation. Sustained conversational interventions and just-in-time adaptive support motivate considering both goals and changing context when selecting an intervention~\cite{bickmore2013interventions,nahumshani2018jitai}. Explicit event rules and escalation policies complement LLM interpretation, so predefined alarms do not depend solely on generated language. The record distinguishes observed evidence, inferred context, proposed actions, and human decisions.
+
+\paragraph{Feedback to interaction and actuation.}
+Selected interventions return through an execution service to wearables, robots, caregiver interfaces, or household actuators. An inactivity episode, for example, may prompt a wearable reminder or a robot-delivered suggestion when consistent with the user's goals and current context. An alarm may notify a caregiver and activate an agreed audible or visual signal. The execution service checks the target, permitted action, and applicable confirmation policy, then records delivery, acknowledgement, and device feedback. Subsequent observations help assess the user's response and whether a goal-related change occurred; command delivery alone does not demonstrate goal achievement. This feedback closes the loop between sensing, interpretation, shared supervision, and action while allowing each component to be replaced or extended.
+
+% BibTeX references for General Architecture (copy without leading percent signs).
+% @misc{homeassistantZha,
+%   author = {{Home Assistant}},
+%   title = {Zigbee Home Automation},
+%   url = {https://www.home-assistant.io/integrations/zha/},
+%   note = {Accessed: 2026-10-08}
+% }
+%
+% @misc{homeassistantZwave,
+%   author = {{Home Assistant}},
+%   title = {{Z-Wave}},
+%   url = {https://www.home-assistant.io/integrations/zwave_js/},
+%   note = {Accessed: 2026-10-08}
+% }
+%
+% @techreport{schulzrinne2003rtp,
+%   author = {Schulzrinne, Henning and Casner, Stephen and Frederick, Ron and Jacobson, Van},
+%   title = {{RTP}: A Transport Protocol for Real-Time Applications},
+%   institution = {RFC Editor}, number = {3550}, year = {2003},
+%   doi = {10.17487/RFC3550}, url = {https://www.rfc-editor.org/rfc/rfc3550}
+% }
+%
+% @techreport{oasis2019mqtt,
+%   author = {{OASIS}}, title = {{MQTT} Version 5.0},
+%   institution = {OASIS}, type = {OASIS Standard}, year = {2019},
+%   url = {https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html}
+% }
+%
+% @misc{zerocIcestorm,
+%   author = {{ZeroC}}, title = {{IceStorm}: {Ice} 3.8 Documentation},
+%   url = {https://docs.zeroc.com/ice/3.8/cpp/icestorm},
+%   note = {Accessed: 2026-10-08}
+% }
+%
+
+% @article{polo2025health,
+%   author = {Polo-Rodr{\'i}guez, Aurora and L{\'o}pez, Isabel Valenzuela and Diaz, Raquel and Rivadeneyra, Almudena and Gil, David and Medina-Quero, Javier},
+%   title = {Modelling Key Health Indicators from Sensor Data Using Knowledge Graphs and Fuzzy Logic},
+%   year = {2025},
+%   journal = {Electronics},
+%   volume = {14},
+%   number = {12},
+%   pages = {2459},
+%   doi = {10.3390/electronics14122459},
+%   url = {https://doi.org/10.3390/electronics14122459}
+% }
+%
+% @article{shi2016edge,
+%   author = {Shi, Weisong and Cao, Jie and Zhang, Quan and Li, Youhuizi and Xu, Lanyu},
+%   title = {Edge Computing: Vision and Challenges},
+%   journal = {IEEE Internet of Things Journal},
+%   year = {2016}, volume = {3}, number = {5}, pages = {637--646},
+%   doi = {10.1109/JIOT.2016.2579198}
+% }
+%
+% @article{ordonez2016deep,
+%   author = {Ord{\'o}{\~n}ez, Francisco Javier and Roggen, Daniel},
+%   title = {Deep Convolutional and {LSTM} Recurrent Neural Networks for Multimodal Wearable Activity Recognition},
+%   journal = {Sensors}, year = {2016}, volume = {16}, number = {1}, pages = {115},
+%   doi = {10.3390/s16010115}
+% }
+%
+% @misc{sorrentino2023cloudia,
+%   author = {Sorrentino, Alessandra and Fiorini, Laura and {La Viola}, Carlo and Cavallo, Filippo},
+%   title = {Measuring the Perception of the Personalized Activities with {CloudIA} Robot},
+%   year = {2023}, eprint = {2312.06481}, archivePrefix = {arXiv}, primaryClass = {cs.RO},
+%   doi = {10.48550/arXiv.2312.06481}, url = {https://arxiv.org/abs/2312.06481}
+% }
+%
+% @misc{polo2025chatbots,
+%   author = {Polo-Rodr{\'i}guez, Aurora and Fiorini, Laura and Rovini, Erika and Cavallo, Filippo and Medina-Quero, Javier},
+%   title = {Enhancing Smart Environments with Context-Aware Chatbots using Large Language Models},
+%   year = {2025}, eprint = {2502.14469}, archivePrefix = {arXiv}, primaryClass = {cs.CL},
+%   doi = {10.48550/arXiv.2502.14469}, url = {https://arxiv.org/abs/2502.14469}
+% }
+%
+% @article{bickmore2013interventions,
+%   author = {Bickmore, Timothy W. and Schulman, Daniel and Sidner, Candace},
+%   title = {Automated Interventions for Multiple Health Behaviors Using Conversational Agents},
+%   journal = {Patient Education and Counseling},
+%   year = {2013}, volume = {92}, number = {2}, pages = {142--148},
+%   doi = {10.1016/j.pec.2013.05.011}
+% }
+%
+% @article{nahumshani2018jitai,
+%   author = {Nahum-Shani, Inbal and Smith, Shawna N. and Spring, Bonnie J. and Collins, Linda M. and Witkiewitz, Katie and Tewari, Ambuj and Murphy, Susan A.},
+%   title = {Just-in-Time Adaptive Interventions ({JITAIs}) in Mobile Health: Key Components and Design Principles for Ongoing Health Behavior Support},
+%   journal = {Annals of Behavioral Medicine},
+%   year = {2018}, volume = {52}, number = {6}, pages = {446--462},
+%   doi = {10.1007/s12160-016-9830-8}
+% }
+%
+% @article{faragher2015ble,
+%   author = {Faragher, Ramsey and Harle, Robert},
+%   title = {Location Fingerprinting With Bluetooth Low Energy Beacons},
+%   journal = {IEEE Journal on Selected Areas in Communications},
+%   year = {2015}, volume = {33}, number = {11}, pages = {2418--2428},
+%   doi = {10.1109/JSAC.2015.2430281}
+% }
+%
+% @article{dardari2009ranging,
+%   author = {Dardari, Davide and Conti, Andrea and Ferner, Ulric and Giorgetti, Andrea and Win, Moe Z.},
+%   title = {Ranging With Ultrawide Bandwidth Signals in Multipath Environments},
+%   journal = {Proceedings of the IEEE},
+%   year = {2009}, volume = {97}, number = {2}, pages = {404--426},
+%   doi = {10.1109/JPROC.2008.2008846}
+% }
+%
+% @inproceedings{zhang2022bytetrack,
+%   author = {Zhang, Yifu and Sun, Peize and Jiang, Yi and Yu, Dongdong and Weng, Fucheng and Yuan, Zehuan and Luo, Ping and Liu, Wenyu and Wang, Xinggang},
+%   title = {{ByteTrack}: Multi-object Tracking by Associating Every Detection Box},
+%   booktitle = {Computer Vision -- ECCV 2022},
+%   series = {Lecture Notes in Computer Science}, volume = {13682},
+%   year = {2022}, pages = {1--21}, publisher = {Springer},
+%   doi = {10.1007/978-3-031-20047-2_1}
+% }
+
+\end{document}

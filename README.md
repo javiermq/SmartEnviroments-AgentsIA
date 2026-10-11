@@ -18,21 +18,35 @@ La personalidad cercana, con humor suave y acompañamiento opcional, se edita en
 Para conversar con Ollama local y Qwen3 4B Instruct 2507 (sin razonamiento), desde la raíz del proyecto:
 
 ```powershell
-python -u -m smart_home_agent.conversation_demo --t0 "2026-09-16T18:56:00+02:00"
+python -u -m smart_home_agent.conversation_demo --verbose
 ```
 
 Escribe `salir` para terminar. Esta demo usa Ollama en `127.0.0.1:11434` y conserva
 el historial de diálogo durante la sesión. La primera respuesta puede tardar por
 la carga del modelo y el procesamiento del contexto.
 
-Esta demo requiere `ollama pull qwen3:4b-instruct-2507-q4_K_M` y envía `think: false` con un
-contexto de 8192 tokens. En cada turno muestra por stderr el prompt completo,
-los sensores, las actividades/HAR, la petición y la respuesta de Ollama.
-Las trazas de herramientas aparecen solo cuando el modelo las solicita.
-Los sensores y las actividades se leen de archivos locales, no de servicios HTTP.
+La demo tiene dos agentes: A selecciona contexto y hace cero, una o varias
+consultas Python; B recibe su resumen y los resultados verificados, y aplica
+el objetivo, el humor y el lenguaje coloquial de `agent_style.txt`.
+Ambos usan el mismo modelo y conservan el diálogo de la sesión.
+`t0` tiene por defecto `2026-09-16T18:56:00+02:00`, una hora del dataset simulado;
+se puede cambiar con `--t0`. La función de A es
+`query_window(sensor_type, window_minutes, t0=..., aggregation="total")`:
+consulta `[t0 - window_minutes, t0)`. Omitir `t0` en la herramienta usa el de la sesión.
+Se rechazan ventanas incompletas y consultas posteriores a la hora de la sesión.
 
-Las consultas reconocidas de pasos y duración del sueño tienen una ruta verificada
-común a la demo y al backend: ejecutan `query_aggregation` y redactan los números
+Esta demo requiere `ollama pull qwen3:4b-instruct-2507-q4_K_M` y envía `think: false`
+con un contexto de 8192 tokens. Verbose está activado por defecto; `--no-verbose`
+lo desactiva. Por stderr muestra `agent_request` (agente, URL y payload completo),
+`agent_response` (respuesta completa), `tool_call`, `tool_result`/`tool_error`
+y `agent_handoff` (resumen A→B y resultados). Es una traza observable, no un
+razonamiento interno reconstruido; con `think=false` el modelo no solicita razonamiento.
+Los sensores y las actividades se leen de archivos locales.
+Puedes ajustar el objetivo con `--goal "Ayudar a mantener una rutina agradable"`.
+Para guardar también la traza: `python -u -m smart_home_agent.conversation_demo --verbose 2> agentes.log`.
+
+El backend clásico usado por los servicios conserva la ruta verificada de
+pasos y duración del sueño: ejecuta `query_aggregation` y redacta los números
 directamente desde su resultado, sin pedir al modelo que los invente o reformule.
 En estos turnos verás trazas de herramienta, pero no una llamada a Ollama.
 Se admiten hoy (también por defecto), ayer, dos horas HH:MM en el mismo día,

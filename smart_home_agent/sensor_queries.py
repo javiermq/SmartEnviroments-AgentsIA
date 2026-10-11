@@ -17,6 +17,25 @@ SENSOR_TYPES = {
     "watch.sleep": ("sleep", "minutes"),
 }
 AGGREGATIONS = {"total", "mean", "max", "min"}
+DEFAULT_T0 = "2026-09-16T18:56:00+02:00"
+
+
+def query_window(sensor_type: str, window_minutes: float, t0: str = DEFAULT_T0,
+                 aggregation: str = "total", data_file: Path | str = DATA_FILE) -> dict[str, Any]:
+    """Consulta [t0 - window_minutes, t0); t0 se puede sobrescribir."""
+    import math
+    if isinstance(window_minutes, bool) or not isinstance(window_minutes, (int, float)) or not math.isfinite(window_minutes) or window_minutes <= 0:
+        raise ValueError("window_minutes debe ser un número positivo y finito.")
+    end = datetime.fromisoformat(t0.replace("Z", "+00:00"))
+    if end.tzinfo is None:
+        raise ValueError("t0 debe incluir zona horaria.")
+    start = end - timedelta(minutes=window_minutes)
+    if start.second or end.second or start.microsecond or end.microsecond:
+        raise ValueError("La ventana debe usar minutos completos.")
+    result = query_aggregation(sensor_type, start.isoformat(), end.isoformat(), aggregation, data_file)
+    if result["samples"] != window_minutes:
+        raise ValueError("No hay cobertura completa de minutos para ese intervalo.")
+    return {**result, "t0": end.isoformat(), "window_minutes": window_minutes}
 
 
 def _parse_time(value: str, reference_day: str) -> datetime:
