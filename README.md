@@ -344,3 +344,18 @@ Consulta [docs/MULTIUSER_DEPLOYMENT.md](docs/MULTIUSER_DEPLOYMENT.md) para inici
 Javi y Mariola con carpetas e historiales separados, visión en 11436 y audio y
 conversación en 11435. En Reachy usa un único `main.py --face-recognition` para
 coordinar cámara, saludos, audio y movimientos.
+
+## Agente de consulta histórica con Qwen
+
+El módulo independiente `smart_home_agent.historical_agent` consulta los TSV
+reducidos mediante métricas y tramos por condiciones explícitas. La interpretación
+se apoya en una capa separada de reglas HAR configurables y evidencia trazable.
+Limpieza y refinamiento son preprocesamiento externo. Consulta
+[la guía de uso, reglas y feedback sobre datos](docs/HISTORICAL_AGENT.md).
+
+```powershell
+python -m smart_home_agent.historical_agent --summary
+python -m smart_home_agent.historical_agent --activities all
+python -m smart_home_agent.historical_agent "¿Cuántos pasos hay observados hoy?"
+python -m unittest tests.test_historical_har -v
+```
