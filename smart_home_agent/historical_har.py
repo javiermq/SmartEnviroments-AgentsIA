@@ -31,7 +31,7 @@ WARNINGS = [
     'Vacío es desconocido; no se interpolan ni arrastran valores.',
     'Habitación UWB estimada; no es HAR validado ni identifica a la persona.',
     'Ambientales: máximos observados de cambios; indicadores de retenidos omitidos en el export reducido.',
-    'HR: última lectura de cada minuto; Bedtime: modo del SO, no sueño fisiológico.',
+    'HR: última lectura de cada minuto; Bedtime: modo del SO.',
     'Red: 1 contacto, 2 reposo anunciado, 3 desconexión explícita, 4 Wi-Fi sin verificar.',
     't0 limita tiempo de observación, no reconstruye las revisiones conocidas históricamente en t0.',
 ]
@@ -147,12 +147,17 @@ class History:
                 'snapshot': self.sources}
 
     def resumir_intervalo(self, t0: str | None = None, window: str = 'hoy',
-                         start: str | None = None, end: str | None = None) -> dict[str, Any]:
+                         start: str | None = None, end: str | None = None,
+                         measure: str | None = None) -> dict[str, Any]:
+        if measure is not None and measure not in (*SIGNALS, 'habitacion'):
+            raise ValueError('Medida no permitida')
         a, b, ref = self.interval(t0, window, start, end)
         result = self.base(a, b, ref)
         rows = [r for t, r in sorted(self.rows.items()) if a <= t < b]
         metrics = {}
         for key, unit in SIGNALS.items():
+            if measure is not None and key != measure:
+                continue
             values = [v for r in rows if (v := number(r, key)) is not None]
             stat = {'unit': unit, 'observed_minutes': len(values),
                     'unknown_minutes': (b-a)//60-len(values)}
@@ -173,6 +178,9 @@ class History:
             for t, r in sorted(self.rows.items()) if a < t < b and t-60 in self.rows
             and r['habitacion'] and self.rows[t-60]['habitacion']
             and r['habitacion'] != self.rows[t-60]['habitacion']]
+        if measure is not None and measure != 'habitacion':
+            result.pop('rooms_observed_minutes')
+            result.pop('room_transitions')
         return result
 
     def consultar_minutos(self, columns: list[str], t0: str | None = None, window: str = 'hoy',

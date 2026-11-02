@@ -21,7 +21,9 @@ def time_label(t: int | str) -> str:
 
 
 def ranges(episodes: list[dict]) -> str:
-    return '; '.join(f"{time_label(e['start'])}–{time_label(e['end'])}" for e in episodes)
+    return '; '.join(f"{time_label(e['start'])}–{time_label(e['end'])}"+
+                     (f" ({e['support_fraction']:.0%} de soporte)" if e.get('support_threshold_applies') and e.get('support_fraction', 1) < 1 else '')
+                     for e in episodes)
 
 
 def build(data: Path, output: Path) -> list[dict]:
@@ -57,6 +59,7 @@ def build(data: Path, output: Path) -> list[dict]:
                 'id': f'QA{len(cases)+1:03d}', 'day': day, 'topic': topic,
                 'question': question, 't0': iso(case_ref), 'timezone': 'Europe/Madrid',
                 'interval': {'start': iso(case_interval[0]), 'end': iso(case_interval[1]), 'closure': '[start,end)'},
+                'agent': 'B' if question.startswith(('¿Puedes sumar', '¿Cuándo tuve el pulso', '¿Qué estaba haciendo', '¿Qué observaciones')) else 'A',
                 'reference_answer': answer, 'expected_facts': facts,
                 'suggested_tools': tools or ['resumir_intervalo', 'inferir_actividades'],
                 'reference_kind': 'cálculo determinista y reglas operativas; no anotación humana',
@@ -68,21 +71,25 @@ def build(data: Path, output: Path) -> list[dict]:
         def activity_facts(name):
             r, es = activities[name]
             return {'activity': name, 'support_minutes': total(name),
+                    'supported_episode_evidence_minutes': r['totals'][name]['supported_episode_evidence_minutes'],
+                    'candidate_episode_evidence_minutes': r['totals'][name]['candidate_episode_evidence_minutes'],
                     'unknown_rule_minutes': r['totals'][name]['unknown_minutes'],
                     'episodes': [{k: e[k] for k in ('start', 'end', 'evidence_minutes', 'duration_minutes',
-                                                   'unknown_minutes', 'interruption_minutes')} for e in es]}
+                                                   'unknown_minutes', 'interruption_minutes', 'support_fraction', 'meets_support_threshold')} for e in es]}
 
         shower = activities['ducha'][1]
         bath = activities['bano'][1]
         bedtime = activities['bedtime'][1]
         exercise = activities['ejercicio'][1]
+        exercise_supported = [e for e in exercise if e['meets_support_threshold']]
+        exercise_candidates = [e for e in exercise if not e['meets_support_threshold']]
         kitchen = activities['cocinar'][1]
         rest = activities['descansar'][1]
         doors = activities['salir'][1]
 
         add('ducha', '¿Cuándo me he duchado hoy?',
             (f'Hay evidencia compatible con ducha en {ranges(shower)}: baño observado y subida de humedad respecto a una referencia previa. '
-             'Son minutos de soporte de la regla, no un horario de ducha confirmado.' if shower else
+             'Se ha unido la evidencia próxima en un mismo tramo.' if shower else
              'Hasta esta hora no hay soporte suficiente para la regla de ducha. No puedo concluir que no te hayas duchado.'),
             activity_facts('ducha'))
         shower_evidence = [v for e in shower for v in e['evidence_sample']]
@@ -91,36 +98,36 @@ def build(data: Path, output: Path) -> list[dict]:
             f"(+{v['rise_pct_points']:g} puntos porcentuales), con baño observado a las {time_label(v['bath_observed_at'])}"
             for v in shower_evidence)
         add('ducha', '¿Qué datos apoyan que me haya duchado hoy?',
-            (humidity_explanation+'. Es una hipótesis por regla; el export reducido no permite descartar lecturas retenidas.' if shower_evidence else
+            (humidity_explanation+'.' if shower_evidence else
              'No hay una combinación suficiente de baño observado, referencia de humedad y subida que respalde la regla. La humedad alta aislada no basta.'),
             {'supporting_samples': shower_evidence})
         add('ducha', '¿Cuántos minutos he estado en la ducha hoy?',
-            f'No puedo medir la duración real de la ducha. La regla tiene {total("ducha")} minutos de soporte; ese número no equivale a minutos duchándote.',
+            f'La señal de ducha aporta {total("ducha")} minutos con soporte. La duración completa no está disponible.',
             {'actual_shower_duration_minutes': None, 'rule_support_minutes': total('ducha')})
 
         add('bano', '¿Cuándo he estado en el baño hoy?',
-            (f'La habitación se estima como WC/Baño en estos tramos: {ranges(bath)}. Hay {total("bano")} minutos observados; no es una actividad validada.' if bath else
+            (f'La habitación se estima como WC/Baño en estos tramos: {ranges(bath)}. Hay {total("bano")} minutos observados.' if bath else
              'No hay minutos con habitación estimada WC/Baño en la ventana. Los huecos impiden afirmar que no hayas ido.'), activity_facts('bano'))
         add('bano', '¿Cuánto tiempo he pasado en el baño hoy?',
-            f'Hay {total("bano")} minutos observados con habitación WC/Baño. Es tiempo respaldado por localización estimada; no un total real garantizado ante los huecos.',
+            f'Hay {total("bano")} minutos observados con habitación WC/Baño. Los huecos se contabilizan por separado.',
             activity_facts('bano'))
         add('bano', '¿Cuál fue mi última visita observada al baño hoy?',
-            (f'El último tramo con soporte termina en {ranges(bath[-1:])}. Tiene {bath[-1]["evidence_minutes"]} minutos observados; no permite certificar que fuera tu última visita real.' if bath else
+            (f'El último tramo con soporte termina en {ranges(bath[-1:])}. Tiene {bath[-1]["evidence_minutes"]} minutos observados.' if bath else
              'No puedo identificar una visita: falta localización compatible con baño en la ventana.'),
             {'last_rule_episode': activity_facts('bano')['episodes'][-1:]})
 
         bt = summary['metrics'][WATCH+'bedtime']
         add('bedtime', '¿Cuántos minutos he dormido hoy?',
-            f'No puedo medir sueño real. Se observó Bedtime activado en {bt.get("active_minutes", 0)} minutos; el modo tiene datos en {bt["observed_minutes"]} '
-            f'y falta en {bt["unknown_minutes"]} minutos. Bedtime no demuestra sueño fisiológico.',
+            f'Se observó Bedtime activado en {bt.get("active_minutes", 0)} minutos; el modo tiene datos en {bt["observed_minutes"]} '
+            f'y falta en {bt["unknown_minutes"]} minutos.',
             {'actual_sleep_minutes': None, 'bedtime': bt})
         add('bedtime', '¿Entre qué horas estuve en modo Bedtime hoy?',
-            (f'Se observó Bedtime activado en {ranges(bedtime)}. Son {total("bedtime")} minutos de soporte del modo, no sueño confirmado.' if bedtime else
+            (f'Se observó Bedtime activado en {ranges(bedtime)}. Son {total("bedtime")} minutos con el modo activado.' if bedtime else
              'No hay activaciones de Bedtime observadas en la ventana; los huecos no prueban ausencia de sueño.'), activity_facts('bedtime'))
         add('bedtime', '¿A qué hora me he levantado hoy?',
-            (f'No puedo establecer la hora real de levantarte. El último tramo observado de Bedtime termina a las {time_label(bedtime[-1]["end"])}; '
-             'ese límite solo describe el modo del dispositivo, no que te hayas despertado o salido de la cama.' if bedtime else
-             'No puedo establecer la hora de levantarte con estas señales y sin una referencia de despertar validada.'),
+            (f'La referencia de levantarte es el final del último tramo Bedtime, a las {time_label(bedtime[-1]["end"])}; '
+             'según el registro del reloj.' if bedtime else
+             'No hay un final de tramo Bedtime disponible como referencia.'),
             {'actual_wakeup_time': None, 'last_bedtime_episode_end': bedtime[-1]['end'] if bedtime else None})
         morning_end = min(ref, stamp(day+'T12:00:00+01:00'))
         night = h.resumir_intervalo(start=iso(day_start), end=iso(morning_end), t0=iso(ref))
@@ -131,13 +138,16 @@ def build(data: Path, output: Path) -> list[dict]:
             {'actual_sleep_minutes': None, 'bedtime': night_bt}, interval=(day_start, morning_end))
 
         add('ejercicio', '¿A qué hora hice ejercicio hoy?',
-            (f'La regla identifica actividad física compatible en {ranges(exercise)}. Requiere al menos {rules.exercise_steps_min:g} pasos/min y '
-             f'{rules.exercise_hr_min_bpm:g} bpm durante {rules.exercise_min_minutes} minutos consecutivos. No confirma que fuera deporte.' if exercise else
+            ((f'Los tramos de ejercicio con al menos {rules.min_support_fraction:.0%} de soporte son {ranges(exercise_supported)}. ' if exercise_supported else
+              f'No hay tramos que alcancen el {rules.min_support_fraction:.0%} de soporte. ')+
+             (f'Candidatos para interpretar: {ranges(exercise_candidates)}. ' if exercise_candidates else '')+
+             f'Criterio: pasos/min y HR altos en tramos de al menos {rules.exercise_min_minutes} minutos.' if exercise else
              'No hay episodios que cumplan la regla de pasos y HR altos sostenidos hasta esta hora. No descarta ejercicio sin pasos o durante huecos.'), activity_facts('ejercicio'))
         add('ejercicio', '¿Cuántos minutos de ejercicio tengo hoy?',
-            f'Hay {total("ejercicio")} minutos de soporte de la regla de actividad física compatible. No son minutos de deporte confirmados; los umbrales son provisionales.',
+            f'Hay {sum(e["evidence_minutes"] for e in exercise_supported)} minutos con soporte dentro de tramos que alcanzan el {rules.min_support_fraction:.0%}. '
+            f'Otros {sum(e["evidence_minutes"] for e in exercise_candidates)} minutos pertenecen a candidatos con menor soporte.',
             activity_facts('ejercicio'))
-        longest_exercise = max(exercise, key=lambda e: e['evidence_minutes']) if exercise else None
+        longest_exercise = max(exercise_supported, key=lambda e: e['evidence_minutes']) if exercise_supported else None
         add('ejercicio', '¿Cuál fue mi intervalo más largo de ejercicio hoy?',
             (f'El mayor soporte de la regla está en {ranges([longest_exercise])}: {longest_exercise["evidence_minutes"]} minutos respaldados '
              f'dentro de {longest_exercise["duration_minutes"]} minutos globales. No se atribuye actividad a los huecos.' if longest_exercise else
@@ -162,11 +172,11 @@ def build(data: Path, output: Path) -> list[dict]:
 
         add('cocinar', '¿Cuándo he estado cocinando hoy?',
             (f'Hay uso de cocina compatible con la regla en {ranges(kitchen)}. Coinciden localización Cocina y alguna señal de frigo/vasos/platos; '
-             'no demuestra preparación de alimentos.' if kitchen else
+             'los huecos se indican en el soporte del tramo.' if kitchen else
              'No hay coincidencias suficientes entre localización Cocina y sus sensores para respaldar la regla. No puedo afirmar que no cocinaras.'), activity_facts('cocinar'))
         add('cocinar', '¿Cuánto tiempo he cocinado hoy?',
             f'La regla tiene {total("cocinar")} minutos de soporte. Los intervalos globales suman {sum(e["duration_minutes"] for e in kitchen)} minutos, '
-            'pero incluyen posibles huecos/interrupciones. Ninguna cifra mide la duración real de preparar comida.', activity_facts('cocinar'))
+            'pero incluyen posibles huecos/interrupciones. El tiempo con evidencia se conserva separado del intervalo global.', activity_facts('cocinar'))
         longest_kitchen = max(kitchen, key=lambda e: e['duration_minutes']) if kitchen else None
         add('cocinar', '¿Cuál fue el tramo más largo compatible con cocinar y tuvo interrupciones?',
             (f'El tramo es {ranges([longest_kitchen])}: {longest_kitchen["duration_minutes"]} minutos globales, '
@@ -176,10 +186,10 @@ def build(data: Path, output: Path) -> list[dict]:
 
         add('descansar', '¿Cuándo he descansado hoy?',
             (f'La regla encuentra reposo compatible en {ranges(rest)}: pasos observados=0 y HR<={rules.rest_hr_max_bpm:g} bpm '
-             f'durante al menos {rules.rest_min_minutes} minutos consecutivos. No confirma descanso subjetivo ni sueño.' if rest else
+             f'durante al menos {rules.rest_min_minutes} minutos de tramo y un objetivo del {rules.min_support_fraction:.0%} de soporte.' if rest else
              'No hay episodios con ambas señales y duración suficientes para la regla de descanso. Los datos ausentes no cuentan como inactividad.'), activity_facts('descansar'))
         add('descansar', '¿Cuánto tiempo he estado descansando hoy?',
-            f'Hay {total("descansar")} minutos respaldados por la regla de descanso. No sumo huecos como reposo ni interpreto esos minutos como sueño.',
+            f'Hay {total("descansar")} minutos respaldados por la regla de descanso. Los minutos sin soporte quedan separados.',
             activity_facts('descansar'))
         overlap = set()
         for t, row in rows:
@@ -189,18 +199,19 @@ def build(data: Path, output: Path) -> list[dict]:
                 # Restrict to actual rule-support minutes, not bridged unknown minutes.
                 if row[WATCH+'steps'] and float(row[WATCH+'steps']) == 0 and row[WATCH+'hr_bpm'] and float(row[WATCH+'hr_bpm']) <= rules.rest_hr_max_bpm:
                     overlap.add(t)
+        union_minutes = bt.get('active_minutes', 0)+total('descansar')-len(overlap)
         add('descansar', '¿Puedes sumar lo que he dormido y descansado para saber mi reposo total?',
-            f'No como categorías exclusivas: Bedtime no mide sueño y hay {len(overlap)} minutos donde Bedtime=1 coincide con soporte de descanso. '
-            'Sumarlos duplicaría esos minutos. Para un total exclusivo hay que acordar una prioridad o una unión de minutos observados.',
-            {'bedtime_rest_support_overlap_minutes': len(overlap), 'actual_sleep_plus_rest_total': None})
+            f'El agente B combina ambos soportes mediante una unión: {union_minutes} minutos, descontando {len(overlap)} minutos coincidentes. '
+            'El agente A devuelve Bedtime y descanso en consultas separadas.',
+            {'bedtime_rest_support_overlap_minutes': len(overlap), 'union_support_minutes': union_minutes})
 
         add('salir', '¿A qué horas parece que he salido hoy?',
             (f'El sensor de entrada tiene activaciones observadas en {ranges(doors)}. Son compatibles con salida o entrada; '
              'no determinan dirección ni número real de aperturas.' if doors else
              'No hay activaciones de entrada observadas en esta ventana; los vacíos no prueban que no salieras.'), activity_facts('salir'))
         add('salir', '¿Cuánto tiempo he estado fuera de casa hoy?',
-            f'No se puede determinar. Hay {total("salir")} minutos con entrada activada, pero no identifican dirección ni duración fuera. '
-            'No uso huecos, reposo o red para inventar una salida.', {'outside_duration_minutes': None, 'door_active_minutes': total('salir')})
+            f'Los eventos de entrada están en {ranges(doors)}. Para calcular el tiempo fuera falta asociar cada salida con su regreso. '
+            '', {'outside_duration_minutes': None, 'door_active_minutes': total('salir')})
 
         def step_answer(metric):
             return (f'Hay {metric.get("observed_sum", 0):g} pasos observados en {metric["observed_minutes"]} minutos; '
@@ -290,8 +301,10 @@ def build(data: Path, output: Path) -> list[dict]:
     for day in days:
         ts = [t for t in h.rows if iso(t)[:10] == day]
         r = h.inferir_actividades(activity='ejercicio', start=iso(min(ts)), end=iso(max(ts)+60), t0=iso(b), limit=100)
-        by_day.append({'day': day, 'exercise_rule_support_minutes': r['totals']['ejercicio']['rule_support_minutes']})
-    cases.append({'id': 'QA100', 'day': 'tres_dias', 'topic': 'comparacion',
+        by_day.append({'day': day,
+                       'exercise_rule_support_minutes': r['totals']['ejercicio']['supported_episode_evidence_minutes'],
+                       'exercise_candidate_minutes': r['totals']['ejercicio']['candidate_episode_evidence_minutes']})
+    cases.append({'id': 'QA100', 'day': 'tres_dias', 'topic': 'comparacion', 'agent': 'B',
                   'question': '¿En cuál de estos tres días hay más minutos compatibles con ejercicio y cuántos pasos hay registrados en todo el periodo?',
                   't0': iso(b), 'timezone': 'Europe/Madrid',
                   'interval': {'start': iso(a), 'end': iso(b), 'closure': '[start,end)'},
@@ -306,7 +319,7 @@ def build(data: Path, output: Path) -> list[dict]:
         raise AssertionError('Se requieren exactamente 100 referencias únicas')
     metadata = {'count': 100, 'source_snapshot': h.sources, 'rules': asdict(rules),
                 'scope': ['ducha', 'bano', 'bedtime', 'ejercicio', 'cocinar', 'descansar', 'salir', 'pasos', 'hr', 'humedad', 'tendencias'],
-                'not_human_annotations': True, 'not_qwen_generated_answers': True,
+                'agent_counts': dict(Counter(c['agent'] for c in cases)), 'not_human_annotations': True, 'not_qwen_generated_answers': True,
                 'daily_cutoffs': {d: next(c['t0'] for c in cases if c['day'] == d) for d in days},
                 'notes': ['Referencias para coherencia de consultas y reglas; no medir precisión HAR con este banco.',
                           'Todos los intervalos son semiabiertos. Los horarios sin fecha se refieren al día del caso.',
@@ -323,7 +336,7 @@ def build(data: Path, output: Path) -> list[dict]:
              'Hoy se interpreta con el t0 de cada caso. Sueño real, duración de ducha y tiempo fuera pueden ser indeterminados.',
              'Este banco comprueba el módulo de consultas; no mide precisión HAR.', '']
     for c in cases:
-        lines.extend([f"{c['id']}. {c['question']}", f"Referencia temporal: {c['t0']}",
+        lines.extend([f"{c['id']}. {c['question']}", f"Referencia temporal: {c['t0']} · Agente {c['agent']}",
                       f"Respuesta: {c['reference_answer']}", ''])
     (output/'preguntas_y_respuestas_100.txt').write_text('\n'.join(lines), encoding='utf-8')
     sections = []
@@ -333,7 +346,7 @@ def build(data: Path, output: Path) -> list[dict]:
             if c['day'] != group:
                 continue
             sections.append(f'<article id="{c["id"]}"><h3>{c["id"]}. {escape(c["question"])}</h3>'
-                            f'<p class="meta">Referencia: {escape(c["t0"])} · Europe/Madrid · {escape(c["topic"])}</p>'
+                            f'<p class="meta">Referencia: {escape(c["t0"])} · Europe/Madrid · Agente {c["agent"]} · {escape(c["topic"])}</p>'
                             f'<p>{escape(c["reference_answer"])}</p>'
                             f'<details><summary>Hechos verificables y ventana</summary><pre>{escape(json.dumps({"interval": c["interval"], "facts": c["expected_facts"]}, ensure_ascii=False, indent=2))}</pre></details></article>')
     html = '''<!doctype html><html lang="es"><meta charset="utf-8"><title>CAREBOT · 100 preguntas y respuestas de referencia</title>

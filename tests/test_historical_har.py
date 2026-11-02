@@ -137,7 +137,7 @@ class ObjectiveToolsTests(Fixture):
         self.assertNotIn('activity', r['episodes'][0])
         self.assertNotIn('outside_duration_minutes', r)
         self.assertNotIn('ducha', json.dumps(r))
-        self.assertIn('no sueño fisiológico', ' '.join(r['warnings']))
+        self.assertIn('Bedtime: modo del SO', ' '.join(r['warnings']))
 
     def test_three_valued_logic(self):
         h = self.write([{WATCH+'steps': '5'}, {WATCH+'steps': '0'}, {}])
@@ -150,6 +150,32 @@ class ObjectiveToolsTests(Fixture):
 
 
 class AgentTests(Fixture):
+    def test_agent_a_one_measure_and_one_activity_with_b_handoff(self):
+        self.write([{'habitacion': 'WC'}])
+        h = History(self.directory)
+        summary = h.resumir_intervalo(measure='habitacion', **self.interval(1))
+        self.assertEqual(summary['metrics'], {})
+        summary = h.resumir_intervalo(measure=WATCH+'steps', **self.interval(1))
+        self.assertEqual(list(summary['metrics']), [WATCH+'steps'])
+        self.assertNotIn('rooms_observed_minutes', summary)
+        responses = iter([
+            {'tool_calls': [{'function': {'name': 'resumir_intervalo', 'arguments': {'measure': 'habitacion', 'reason': 'contexto', **self.interval(1)}}}]},
+            {'tool_calls': [{'function': {'name': 'inferir_actividades', 'arguments': {'activity': 'all', 'reason': 'todo', **self.interval(1)}}}]},
+            {'tool_calls': [{'function': {'name': 'inferir_actividades', 'arguments': {'activity': 'bano', 'reason': 'baño', **self.interval(1)}}}]},
+            {'tool_calls': [{'function': {'name': 'inferir_actividades', 'arguments': {'activity': 'bedtime', 'reason': 'combinar', **self.interval(1)}}}]},
+            {'content': 'Agente B: combinar baño y Bedtime requiere consultas separadas.'},
+        ])
+        audit = self.directory/'audit.jsonl'
+        a = HistoricalAgent(self.directory, transport=lambda _: next(responses), audit=audit)
+        a.respond('comparar')
+        records = [json.loads(s) for s in audit.read_text(encoding='utf-8').splitlines()]
+        results = [e['result'] for e in records if e['event'] == 'result']
+        self.assertIn('error', results[1])
+        self.assertEqual(results[2]['episodes'][0]['activity'], 'bano')
+        self.assertIn('error', results[3])
+        b = HistoricalAgent(self.directory, transport=lambda _: {'content': 'Agente B: consultar Bedtime y descanso por separado.'}, audit=self.directory/'b.jsonl')
+        self.assertTrue(b.respond('sumar sueño y descanso').startswith('Agente B:'))
+
     def test_real_dispatch_cutoff_and_audit(self):
         self.write([{WATCH+'steps': '2'}, {WATCH+'steps': '900'}])
         calls = [
@@ -207,12 +233,11 @@ class HarRuleTests(Fixture):
         self.assertEqual(r['episodes'][0]['evidence_minutes'], 6)
         self.assertEqual(h.inferir_actividades(activity='ejercicio', **self.interval(4))['episode_count'], 0)
 
-    def test_exercise_requires_both_levels_and_missing_breaks_run(self):
+    def test_exercise_requires_both_levels(self):
         for rows in (
             [{WATCH+'steps': '80'}]*6,
             [{WATCH+'steps': '10', WATCH+'hr_bpm': '130'}]*6,
             [{WATCH+'steps': '80', WATCH+'hr_bpm': '70'}]*6,
-            [{WATCH+'steps': '80', WATCH+'hr_bpm': '130'}]*3+[{}]+[{WATCH+'steps': '80', WATCH+'hr_bpm': '130'}]*3,
         ):
             h = self.write(rows)
             self.assertEqual(h.inferir_actividades(activity='ejercicio', **self.interval(len(rows)))['episode_count'], 0)
@@ -261,12 +286,56 @@ class HarRuleTests(Fixture):
         self.assertEqual(h.inferir_actividades(activity='descansar', **self.interval(9))['episode_count'], 0)
         self.assertEqual(h.inferir_actividades(activity='descansar', **self.interval(12))['totals']['descansar']['rule_support_minutes'], 12)
 
-    def test_rest_and_bedtime_observed_contradictions_prevent_merge(self):
+    def test_bedtime_short_interruption_is_retained_with_support(self):
         rows = [{WATCH+'bedtime': '1'}, {WATCH+'bedtime': '0'}, {WATCH+'bedtime': '1'}]
         h = self.write(rows)
         r = h.inferir_actividades(activity='bedtime', **self.interval(3))
-        self.assertEqual(r['episode_count'], 2)
-        self.assertIn('no demuestra sueño', ' '.join(r['episodes'][0]['warnings']))
+        self.assertEqual(r['episode_count'], 1)
+        e = r['episodes'][0]
+        self.assertEqual(e['interruption_minutes'], 1)
+        self.assertAlmostEqual(e['support_fraction'], 2/3)
+        self.assertFalse(e['meets_support_threshold'])
+
+    def test_common_support_fraction_and_five_minute_merging(self):
+        for name, positive, negative in (
+            ('bano', {'habitacion': 'WC'}, {'habitacion': 'Dormitorio'}),
+            ('bedtime', {WATCH+'bedtime': '1'}, {WATCH+'bedtime': '0'}),
+            ('cocinar', {'habitacion': 'Cocina', 'cocina_vasos13': '1'}, {'habitacion': 'WC'}),
+            ('ejercicio', {WATCH+'steps': '80', WATCH+'hr_bpm': '120'}, {WATCH+'steps': '0', WATCH+'hr_bpm': '70'}),
+            ('descansar', {WATCH+'steps': '0', WATCH+'hr_bpm': '60'}, {WATCH+'steps': '80', WATCH+'hr_bpm': '120'}),
+        ):
+            h = self.write([positive]*4+[negative]+[positive]*5)
+            r = h.inferir_actividades(activity=name, **self.interval(10))
+            self.assertEqual(r['episode_count'], 1, name)
+            self.assertEqual(r['episodes'][0]['support_fraction'], .9)
+            self.assertTrue(r['episodes'][0]['meets_support_threshold'])
+        h = self.write([{'habitacion': 'WC'}]*4+[{'habitacion': 'Dormitorio'}]*2+[{'habitacion': 'WC'}]*2)
+        e = h.inferir_actividades(activity='bano', **self.interval(8))['episodes'][0]
+        self.assertEqual((e['duration_minutes'], e['evidence_minutes']), (8, 6))
+        self.assertEqual(e['support_fraction'], .75)
+        for gap in (5, 6):
+            h = self.write([{'habitacion': 'WC'}]+[{}]*gap+[{'habitacion': 'WC'}])
+            self.assertEqual(h.inferir_actividades(activity='bano', **self.interval(gap+2))['episode_count'], 1 if gap == 5 else 2)
+
+    def test_exercise_missing_minute_does_not_count_as_support(self):
+        hi = {WATCH+'steps': '80', WATCH+'hr_bpm': '130'}
+        h = self.write([hi]*3+[{}]+[hi]*3)
+        e = h.inferir_actividades(activity='ejercicio', **self.interval(7))['episodes'][0]
+        self.assertEqual((e['evidence_minutes'], e['unknown_minutes']), (6, 1))
+        self.assertTrue(e['meets_support_threshold'])
+
+    def test_exact_eighty_percent_in_minimum_window_includes_known_margin(self):
+        hi = {WATCH+'steps': '80', WATCH+'hr_bpm': '130'}
+        low = {WATCH+'steps': '0', WATCH+'hr_bpm': '60'}
+        h = self.write([hi]*4+[low])
+        e = h.inferir_actividades(activity='ejercicio', **self.interval(5))['episodes'][0]
+        self.assertEqual((e['duration_minutes'], e['evidence_minutes'], e['interruption_minutes']), (5, 4, 1))
+        self.assertEqual(e['support_fraction'], .8)
+        self.assertTrue(e['meets_support_threshold'])
+        h = self.write([low]*8+[hi]*2)
+        e = h.inferir_actividades(activity='descansar', **self.interval(10))['episodes'][0]
+        self.assertEqual((e['duration_minutes'], e['evidence_minutes']), (10, 8))
+        self.assertEqual(e['support_fraction'], .8)
 
     def test_door_only_network_and_missing_never_infer_absence(self):
         h = self.write([{WATCH+'network_evidence': '3'}, {WATCH+'network_evidence': '2'}, {},

@@ -96,7 +96,7 @@ Los valores iniciales están en `docs/har_rules.example.json` y `HarRules`.
 | ducha | Baño observado y subida >=8 puntos porcentuales respecto a lectura conocida anterior al tramo de baño, con referencia de hasta 60 min | Admite hasta 10 min de retraso; humedad alta aislada no basta |
 | bedtime | Modo del SO=1 | No demuestra sueño ni despertar |
 | descansar | Pasos observados=0 y HR observada <=65 bpm durante al menos 10 min consecutivos | Vacíos interrumpen la racha; umbral provisional |
-| ejercicio | Pasos observados >=60 por minuto y HR >=100 bpm, ambos durante al menos 5 min consecutivos | Actividad física ambulatoria compatible; no confirma deporte ni detecta necesariamente ejercicio sin pasos |
+| ejercicio | Pasos observados >=60 por minuto y HR >=100 bpm, ambos en tramos de al menos 5 min, con objetivo de soporte del 80% | Actividad física ambulatoria compatible; no confirma deporte ni detecta necesariamente ejercicio sin pasos |
 | salir | Sensor entrada=1 | Evento compatible con salida o entrada; sin dirección ni duración fuera |
 
 La hipótesis de ducha se sitúa en el último minuto de baño observado, conservando
@@ -105,13 +105,24 @@ solo se usa si pertenece al intervalo consultado y no supera `t0`; por ello una
 consulta posterior puede aportar evidencia que antes faltaba. El minuto de soporte
 no es una estimación de la duración real de ducha.
 
-La unión de episodios HAR admite por defecto huecos de hasta 3 min, con un máximo
-acumulado de 9 min. Se distingue tiempo desconocido de interrupciones observadas.
-En cocina, una visita al WC puede quedar dentro del intervalo global, pero nunca
-suma minutos de cocinar. Evidencia contradictoria, como Bedtime=0 entre dos
-activaciones o movimiento entre tramos de descanso, impide la unión. Una fracción
-de huecos/interrupciones superior al 40% se advierte explícitamente. Los eventos de
-entrada solo agrupan minutos contiguos; nunca se prolongan hasta otra apertura.
+La unión de episodios HAR admite huecos de hasta 5 minutos, incluidos minutos
+observados sin cumplir la condición. El porcentaje de soporte se calcula como
+minutos que cumplen / duración global del tramo, contando vacíos e interrupciones
+en el denominador. El objetivo común es 80% (`min_support_fraction`), configurable.
+Se aplica a cocina, baño, ducha, Bedtime, descanso y ejercicio. Los episodios de
+entrada son eventos y no se someten a un porcentaje temporal.
+
+Los tramos que no llegan al 80% se conservan como candidatos para interpretación,
+con su porcentaje explícito; no se presentan como si cumplieran el umbral. Ejemplo:
+WC 02:22–02:26 y 02:28–02:30 se agrupan en 02:22–02:30, con 6 minutos de soporte,
+2 de interrupción y 75% de soporte. El agente B puede contrastar esa candidatura.
+La duración mínima de descanso es 10 minutos y de ejercicio 5 minutos de tramo;
+no se exige cumplimiento perfecto en todos los minutos. Un núcleo corto puede completar la ventana mínima con su margen conocido: cuatro minutos con soporte y uno de interrupción dan 80% sobre cinco minutos, sin atribuir actividad al margen. No se fabrican muestras.
+
+El límite acumulado de huecos es configurable (por defecto 1.440 minutos), y una
+fracción de huecos alta queda identificada por el soporte. Las ventanas largas
+encadenadas no se convierten automáticamente en actividad sostenida. Entrada solo
+agrupa activaciones contiguas, sin extender una ausencia entre aperturas.
 
 Ducha y Baño pueden solaparse. Los totales de soporte por etiqueta no son exclusivos:
 para sumar actividades se debe acordar prioridad o usar la unión lógica de minutos.
@@ -206,7 +217,7 @@ Mejoras propuestas para un preprocesamiento separado, **aún no implementado**:
 
 ## Pruebas y estado de Qwen
 
-Se ejecutaron 34 pruebas: 31 del módulo nuevo y 3 del backend anterior. Cubren
+Se ejecutaron 38 pruebas: 35 del módulo nuevo y 3 del backend anterior. Cubren
 medianoche, horario de verano/invierno, t0, ceros/vacíos, estadísticas, duplicados,
 paginación, condiciones, huecos 2/3/4, límites acumulados, interrupciones por baño,
 humedad alta sin subida, ausencia de referencia, subida con retraso, límites de
@@ -260,3 +271,22 @@ resultado como precisión HAR. Los casos de días cerrados con «hoy» se cortan
 23:59; la comparación global incluye todos los minutos exportados. Se verificaron
 100 casos únicos, ausencia de evidencia temporal posterior a cada corte y 12
 sumas de pasos mediante lectura CSV independiente.
+
+
+## Alcance actualizado de agentes A y B
+
+El agente A consulta una sola medida o una sola actividad por petición. Sus
+herramientas pueden usar las señales necesarias para esa actividad, pero no mezclar
+etiquetas independientes. El resumen expuesto al modelo selecciona una medida;
+la herramienta HAR exige una actividad concreta y rechaza cambiar de actividad
+durante la misma pregunta. La API Python conserva consultas completas para análisis
+operador y generación del banco. El agente B unificará resultados de A, reglas,
+solapamientos y totales exclusivos; no se ha añadido otro runtime LLM en este cambio.
+
+El banco marca explícitamente `agent=A/B`: 87 casos de A y 13 de B. QA021 y sus
+variantes son de B, y la unión de soportes descuenta la intersección real. Si esta
+es cero no se afirma que haya duplicados. QA100 también corresponde a B. Las
+respuestas de A son directas: se suprimen las advertencias genéricas repetidas
+solicitadas por el usuario, manteniendo la fuente Bedtime, soporte y cobertura.
+Para salidas se muestran eventos de entrada y se identifica la asociación salida/
+regreso como dato pendiente, sin emparejar aperturas arbitrariamente.

@@ -20,8 +20,9 @@ ACTIVITIES = ('cocinar', 'bano', 'ducha', 'bedtime', 'descansar', 'ejercicio', '
 
 @dataclass(frozen=True)
 class HarRules:
-    merge_gap: int = 3
-    max_total_gap: int = 9
+    merge_gap: int = 5
+    max_total_gap: int = 1440
+    min_support_fraction: float = .8
     fridge_lux: float = 10
     humidity_rise_pct_points: float = 8
     humidity_reference_minutes: int = 60
@@ -36,6 +37,8 @@ class HarRules:
         for key, value in asdict(self).items():
             if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
                 raise ValueError('Umbral HAR inválido: '+key)
+        if not 0 < self.min_support_fraction <= 1:
+            raise ValueError('min_support_fraction debe estar en (0,1]')
         for key in ('merge_gap', 'max_total_gap', 'humidity_reference_minutes',
                     'humidity_delay_minutes', 'rest_min_minutes', 'exercise_min_minutes'):
             if not isinstance(getattr(self, key), int):
@@ -48,9 +51,9 @@ RULE_DESCRIPTIONS = {
     'cocinar': 'Habitación Cocina y, en el mismo minuto, frigo >= umbral lux o vasos/platos=1.',
     'bano': 'Habitación estimada WC/Baño/Bano.',
     'ducha': 'Baño observado y subida de humedad respecto a lectura conocida anterior al tramo de baño; admite retraso limitado. Se localiza la hipótesis en el último minuto de baño observado.',
-    'bedtime': 'Modo Bedtime=1, sin afirmar sueño medido ni hora de despertar.',
-    'descansar': 'Pasos observados=0 y HR observada <= umbral durante minutos consecutivos mínimos.',
-    'ejercicio': 'Pasos por minuto y HR observados >= sus umbrales durante minutos consecutivos mínimos. No exige pendiente positiva.',
+    'bedtime': 'Modo Bedtime=1.',
+    'descansar': 'Pasos observados=0 y HR observada <= umbral, con soporte temporal flexible y duración mínima.',
+    'ejercicio': 'Pasos por minuto y HR observados >= sus umbrales, con duración mínima y 80% de soporte temporal configurable. No exige pendiente positiva.',
     'salir': 'Sensor entrada=1: evento compatible con salida o entrada, dirección sin verificar. No determina tiempo fuera.',
 }
 
@@ -83,8 +86,6 @@ def infer_activities(history: History, *, activity: str = 'all', rules: HarRules
                    cfg.rest_min_minutes, cfg.exercise_min_minutes)*60
     humidity = []
     last_bath = bath_start = None
-    rest_run: list[int] = []
-    exercise_run: list[int] = []
     for t in range(a-lookback, b, 60):
         row = history.rows.get(t, {})
         room = row.get('habitacion', '')
@@ -119,27 +120,15 @@ def infer_activities(history: History, *, activity: str = 'all', rules: HarRules
         if steps == 0 and hr is not None and hr <= cfg.rest_hr_max_bpm:
             if a <= t < b:
                 checks['rest_candidate_minutes'] += 1
-            rest_run.append(t)
-            if len(rest_run) >= cfg.rest_min_minutes:
-                for u in rest_run[-cfg.rest_min_minutes:]:
-                    mark('descansar', u, 'match', {WATCH+'steps': 0, WATCH+'hr_bpm': number(history.rows.get(u, {}), WATCH+'hr_bpm')})
-        else:
-            rest_run = []
-            if (steps is not None and steps > 0) or (hr is not None and hr > cfg.rest_hr_max_bpm):
-                mark('descansar', t, 'contradiction')
+            mark('descansar', t, 'match', {WATCH+'steps': steps, WATCH+'hr_bpm': hr})
+        elif (steps is not None and steps > 0) or (hr is not None and hr > cfg.rest_hr_max_bpm):
+            mark('descansar', t, 'nonmatch')
         if steps is not None and hr is not None and steps >= cfg.exercise_steps_min and hr >= cfg.exercise_hr_min_bpm:
             if a <= t < b:
                 checks['exercise_candidate_minutes'] += 1
-            exercise_run.append(t)
-            if len(exercise_run) >= cfg.exercise_min_minutes:
-                for u in exercise_run[-cfg.exercise_min_minutes:]:
-                    mark('ejercicio', u, 'match', {
-                        WATCH+'steps': number(history.rows.get(u, {}), WATCH+'steps'),
-                        WATCH+'hr_bpm': number(history.rows.get(u, {}), WATCH+'hr_bpm')})
-        else:
-            exercise_run = []
-            if (steps is not None and steps < cfg.exercise_steps_min) or (hr is not None and hr < cfg.exercise_hr_min_bpm):
-                mark('ejercicio', t, 'contradiction')
+            mark('ejercicio', t, 'match', {WATCH+'steps': steps, WATCH+'hr_bpm': hr})
+        elif (steps is not None and steps < cfg.exercise_steps_min) or (hr is not None and hr < cfg.exercise_hr_min_bpm):
+            mark('ejercicio', t, 'nonmatch')
         h = number(row, 'bano_humedad7_pct')
         if h is not None:
             if a <= t < b:
@@ -164,10 +153,42 @@ def infer_activities(history: History, *, activity: str = 'all', rules: HarRules
     episodes = []
     totals = {}
     for name in names:
-        runs = segment_states(states[name], 0 if name == 'salir' else cfg.merge_gap, cfg.max_total_gap)
+        # Other observed states interrupt support, but may be bridged as explicit gaps.
+        flexible_states = {t: ('nonmatch' if value == 'contradiction' else value)
+                           for t, value in states[name].items()}
+        runs = segment_states(flexible_states, 0 if name == 'salir' else cfg.merge_gap, cfg.max_total_gap)
+        minimum = cfg.rest_min_minutes if name == 'descansar' else cfg.exercise_min_minutes if name == 'ejercicio' else 1
+        # A short core can meet 80% over a full minimum-length window (e.g. 4/5).
+        # Include that explicitly observed/unknown margin without counting it as support.
+        eligible = []
+        for e in runs:
+            if e['duration_minutes'] < minimum:
+                first, last = stamp(e['start']), stamp(e['end'])
+                windows = []
+                for left in range(max(a, last-minimum*60), min(first, b-minimum*60)+1, 60):
+                    values = [flexible_states[t] for t in range(left, left+minimum*60, 60)]
+                    if values.count('match')/minimum >= cfg.min_support_fraction:
+                        windows.append((left, values))
+                if not windows:
+                    continue
+                left, values = min(windows, key=lambda w: abs(w[0]-first))
+                e.update(start=iso(left), end=iso(left+minimum*60), duration_minutes=minimum,
+                         matching_minutes=values.count('match'), unknown_minutes=values.count('unknown'),
+                         nonmatching_minutes=values.count('nonmatch'), gaps=[],
+                         boundary_censored=left == a or left+minimum*60 == b)
+                for index, value in enumerate(values):
+                    if value != 'match':
+                        t = left+index*60
+                        e['gaps'].append({'start': iso(t), 'end': iso(t+60), 'kind': value})
+            eligible.append(e)
+        runs = eligible
         for e in runs:
             e['activity'] = name
-            e['classification'] = 'hipótesis por regla operativa'
+            e['support_fraction'] = e['matching_minutes']/e['duration_minutes']
+            e['required_support_fraction'] = cfg.min_support_fraction if name != 'salir' else None
+            e['meets_support_threshold'] = e['support_fraction'] >= cfg.min_support_fraction if name != 'salir' else True
+            e['classification'] = 'tramo con soporte' if e['meets_support_threshold'] else 'candidato para interpretación'
+            e['support_threshold_applies'] = name != 'salir'
             e['rule'] = RULE_DESCRIPTIONS[name]
             e['evidence_minutes'] = e.pop('matching_minutes')
             e['interruption_minutes'] = e.pop('nonmatching_minutes')
@@ -187,9 +208,9 @@ def infer_activities(history: History, *, activity: str = 'all', rules: HarRules
             if e['duration_minutes']-e['evidence_minutes'] > e['duration_minutes']*.4:
                 e['warnings'].append('Más del 40% del tramo son huecos/interrupciones; no es actividad sostenida.')
             if name == 'cocinar':
-                e['warnings'].append('Uso de cocina compatible; no demuestra preparación de alimentos.')
+                e['warnings'].append('Etiqueta operativa: uso de cocina.')
             if name == 'bedtime':
-                e['warnings'].append('Modo del SO; no demuestra sueño ni despertar.')
+                e['warnings'].append('Fuente: modo Bedtime del SO.')
             if name == 'ejercicio':
                 e['warnings'].append('Compatible con actividad física ambulatoria; no confirma deporte, intensidad clínica ni detecta necesariamente ejercicio sin pasos. Umbrales provisionales.')
             if name == 'salir':
@@ -198,7 +219,10 @@ def infer_activities(history: History, *, activity: str = 'all', rules: HarRules
                 e['warnings'].append('Hipótesis situada en baño observado; evidencia de humedad puede ser posterior, siempre anterior al fin consultado. No mide duración real de ducha.')
             episodes.append(e)
         totals[name] = {
-            'rule_support_minutes': sum(s == 'match' for s in states[name].values()),
+            'rule_support_minutes': sum(e['evidence_minutes'] for e in runs),
+            'predicate_match_minutes': sum(s == 'match' for s in states[name].values()),
+            'supported_episode_evidence_minutes': sum(e['evidence_minutes'] for e in runs if e['meets_support_threshold']),
+            'candidate_episode_evidence_minutes': sum(e['evidence_minutes'] for e in runs if not e['meets_support_threshold']),
             'unknown_minutes': sum(s == 'unknown' for s in states[name].values()),
             'observed_other_minutes': sum(s in ('nonmatch', 'contradiction') for s in states[name].values()),
         }
@@ -209,7 +233,10 @@ def infer_activities(history: History, *, activity: str = 'all', rules: HarRules
                   prerequisite_checks=checks,
                   next_offset=offset+limit if offset+limit < len(episodes) else None,
                   outside_duration_minutes=None,
-                  status='hipótesis con evidencia' if episodes else 'evidencia insuficiente')
+                  supported_episode_count=sum(e['meets_support_threshold'] for e in episodes),
+                  candidate_episode_count=sum(not e['meets_support_threshold'] for e in episodes),
+                  status=('tramos con soporte' if any(e['meets_support_threshold'] for e in episodes)
+                          else 'candidatos para interpretación' if episodes else 'evidencia insuficiente'))
     result['warnings'].extend([
         'Reglas HAR operativas: no equivalen a hechos medidos ni precisión validada.',
         'No inferir ausencia o desconexión por huecos, reposo o red. Salir solo usa el sensor de entrada.',

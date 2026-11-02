@@ -1,6 +1,6 @@
 {
-  "merge_gap": 3,
-  "max_total_gap": 9,
+  "merge_gap": 5,
+  "max_total_gap": 1440,
   "fridge_lux": 10,
   "humidity_rise_pct_points": 8,
   "humidity_reference_minutes": 60,
@@ -9,5 +9,6 @@
   "rest_min_minutes": 10,
   "exercise_steps_min": 60,
   "exercise_hr_min_bpm": 100,
-  "exercise_min_minutes": 5
+  "exercise_min_minutes": 5,
+  "min_support_fraction": 0.8
 }
