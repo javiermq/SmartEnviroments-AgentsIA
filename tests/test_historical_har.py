@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from smart_home_agent.historical_har import History, SIGNALS, WATCH, iso, stamp
-from smart_home_agent.historical_agent import HistoricalAgent
+from smart_home_agent.historical_agent import LegacyHistoricalAgent as HistoricalAgent
 from smart_home_agent.har_rules import HarRules
 
 
@@ -39,6 +39,50 @@ class Fixture(unittest.TestCase):
 
 
 class ObjectiveToolsTests(Fixture):
+    def test_clean_export_without_optional_network_revision_store(self):
+        self.write([{WATCH+'steps': '4'}])
+        daily = self.directory/'2026-10-31.tsv'
+        with daily.open(encoding='utf-8', newline='') as f:
+            r = csv.DictReader(f, delimiter='\t')
+            rows = list(r)
+        for row in rows:
+            for key in (WATCH+'network_evidence', WATCH+'revision', WATCH+'store'):
+                row.pop(key)
+        clean = self.directory/'clean.txt'
+        with clean.open('w', encoding='utf-8', newline='') as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0]), delimiter='\t')
+            w.writeheader(); w.writerows(rows)
+        h = History(clean)
+        result = h.resumir_intervalo(**self.interval(1))
+        self.assertEqual(result['metrics'][WATCH+'steps']['observed_sum'], 4)
+        self.assertEqual(result['metrics'][WATCH+'network_evidence']['observed_minutes'], 0)
+        self.assertIsNone(h.rows[self.start]['_source']['revision'])
+        self.assertIsNone(h.rows[self.start]['_source']['store'])
+
+    def test_consolidated_file_keeps_originals_and_hides_scenarios_labels(self):
+        self.write([{WATCH+'steps': '5'}])
+        daily = self.directory/'2026-10-31.tsv'
+        with daily.open(encoding='utf-8', newline='') as f:
+            reader = csv.DictReader(f, delimiter='\t')
+            cols = reader.fieldnames
+            rows = list(reader)
+        rows[0].update(escenario_simulado='1', escenario_watch_01_steps='999',
+                       actividad_confirmada_usuario='instruccion_no_es_dato')
+        combined = self.directory/'all_data_72hours.txt'
+        with combined.open('w', encoding='utf-8', newline='') as f:
+            w = csv.DictWriter(f, fieldnames=[*cols, 'escenario_simulado', 'escenario_watch_01_steps', 'actividad_confirmada_usuario'], delimiter='\t')
+            w.writeheader(); w.writerows(rows)
+        h = History(combined)
+        self.assertEqual(h.resumir_intervalo(**self.interval(1))['metrics'][WATCH+'steps']['observed_sum'], 5)
+        self.assertNotIn('actividad_confirmada_usuario', h.rows[self.start])
+        self.assertNotIn('escenario_simulado', h.rows[self.start])
+        with self.assertRaisesRegex(ValueError, 'diario y consolidado'):
+            History(self.directory)
+        with self.assertRaises(ValueError):
+            h.consultar_minutos(['actividad_confirmada_usuario'], **self.interval(1))
+        daily.unlink()
+        self.assertEqual(History(self.directory).latest, h.latest)
+
     def test_missing_zero_steps_hr_power_and_midnight(self):
         h = self.write([{WATCH+'steps': '0', WATCH+'hr_bpm': '60', 'salon_consumo14_w': '100'},
                         {WATCH+'steps': '7', WATCH+'hr_bpm': '80', 'salon_consumo14_w': '200'}, {}]*5)
@@ -426,14 +470,16 @@ class TrendTests(Fixture):
 
 class RealExportTests(unittest.TestCase):
     def test_raw_calculation_matches_tools(self):
-        directory = Path(__file__).resolve().parents[1]/'dataset_home_real/mariola'
+        root = Path(__file__).resolve().parents[1]/'dataset_home_real'
+        directory = root if (root/'all_data_72hours.txt').is_file() else root/'mariola'
         if not directory.is_dir():
             self.skipTest('Export local privado no disponible')
         h = History(directory)
         a = stamp('2026-10-31T00:00:00+01:00')
         b = stamp('2026-11-01T00:00:00+01:00')
         rows = []
-        for p in directory.glob('*.tsv'):
+        for source in h.sources:
+            p = directory/source['file']
             with p.open(encoding='utf-8-sig') as f:
                 rows.extend(r for r in csv.DictReader(f, delimiter='\t') if a <= int(r['timestamp_unix']) < b)
         r = h.resumir_intervalo(start=iso(a), end=iso(b), t0=iso(b))

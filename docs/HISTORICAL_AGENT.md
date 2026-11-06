@@ -1,8 +1,75 @@
 # Agente histórico CAREBOT con Qwen
 
-El agente usa cuatro herramientas de métricas objetivas y una herramienta de
-reglas HAR explícitas. Las observaciones, los resultados de reglas y la explicación
-del LLM permanecen separados. No se modifican el backend anterior, HERA ni los TSV.
+El agente A usa Qwen para seleccionar una medida/actividad, una operación y un
+periodo relativo a la hora registrada con la pregunta. Python resuelve las fechas,
+ejecuta métricas y reglas HAR y devuelve sus cifras verificadas. La interfaz actual
+expone una herramienta tipada; las funciones objetivas y las reglas siguen disponibles
+como API Python. La referencia temporal puede sobrescribirse mediante `t0`.
+
+## Interfaz actual: referencia de pregunta y periodos relativos
+
+```python
+from smart_home_agent.historical_agent import HistoricalAgent
+
+agent = HistoricalAgent("dataset_home_real/all_data_72hours.txt")
+answer = agent.respond_record({
+    "question": "¿Cuántos pasos di ayer?",
+    "timestamp": "2026-11-03T12:06:00+01:00"
+})
+```
+
+`t0` es opcional: tiene prioridad si se proporciona; si no, se usa el timestamp
+del registro. Los timestamps UTC se convierten a Europe/Madrid y se descarta el
+minuto aún incompleto. Solo en uso offline sin registro ni t0 se conserva el
+último minuto disponible como referencia. Esa procedencia queda en la auditoría.
+
+Qwen sí elige el periodo. Puede pedir `period=hoy`, `ayer`, `ultimos_minutos`
+con `minutes=90`, o `dia_relativo` con `day_offset=-2`. También puede desplazar la
+referencia de consulta hacia atrás mediante `anchor_offset_minutes=-120`. Python
+hace la aritmética y mantiene la hora de la pregunta como límite absoluto; los
+desplazamientos futuros se rechazan. `referencia` conserva la ventana por defecto
+del registro (últimas 24 horas, configurable por el llamador). No se aceptan fechas
+absolutas ni rutas en los argumentos generados por el modelo.
+
+```powershell
+python -m smart_home_agent.historical_agent --question-time 2026-11-03T12:06:00+01:00 "¿Cuántos pasos di ayer?"
+```
+
+### Referencias mediante mediana móvil
+
+Se ha confirmado que `salon_consumo14_w` corresponde a la televisión.
+
+- Humedad: **mediana de lecturas observadas en 120 minutos − lectura actual**.
+- Televisión: **mediana de lecturas observadas en 1.440 minutos − lectura actual**.
+
+La ventana es retrospectiva y semiabierta hasta la referencia elegida. La lectura
+actual es la última observada dentro de esa ventana y también participa en la
+mediana. Si hay menos historia se usa toda la disponible, sin umbral mínimo de
+cobertura ni interpolación. Con una única lectura la diferencia es cero y se
+indica que solo hay una lectura; sin ninguna, el resultado es desconocido.
+Se devuelven valor de mediana, valor/hora/antigüedad de lectura actual, diferencia,
+unidades y número de observaciones. Diferencia negativa significa actual por
+encima de la mediana. En humedad se expresa en puntos porcentuales y en TV en W.
+
+API objetiva: `History.desviacion_mediana_movil(column, t0=None,
+window_minutes=None)`. En la herramienta de Qwen se solicita `operation=mediana`
+y `target=humedad` o `television`. La resta se realiza en Python. La métrica se
+adjunta además a consultas estadísticas de estas medidas y a la evidencia de
+humedad de los episodios de ducha; no convierte por sí sola una lectura en una
+actividad ni fija un umbral nuevo de encendido de TV.
+
+Se conservan diferencias entre pares de lecturas con `analizar_cambios` y la
+pendiente con `analizar_tendencia`, como características distintas. La diferencia
+entre pares puede conocerse con pocas lecturas aunque no haya cobertura suficiente
+para una pendiente continua.
+
+Validación actual: **62 pruebas** y llamadas nativas de Qwen usando registros sin
+t0 explícito. Se comprobó que el modelo seleccionó ayer y 120 minutos, y calculó
+las dos medianas con resultados contrastados mediante `statistics.median`.
+Las auditorías están en `temp_data/relative_time_v3_2026-11-06/` y
+`temp_data/mobile_median_v3_2026-11-06/`. La comparación anterior de 27 preguntas
+en `eval_72h_bound_final_2026-11-06` corresponde a la revisión previa con ventanas
+fijadas por el llamador, no a una evaluación completa de esta nueva selección relativa.
 
 ## Ejecución
 
@@ -290,3 +357,34 @@ respuestas de A son directas: se suprimen las advertencias genéricas repetidas
 solicitadas por el usuario, manteniendo la fuente Bedtime, soporte y cobertura.
 Para salidas se muestran eventos de entrada y se identifica la asociación salida/
 regreso como dato pendiente, sin emparejar aperturas arbitrariamente.
+
+## Evaluación del fichero limpio de 72 horas (06/11/2026)
+
+El lector acepta un archivo tabulado explícito aunque su extensión sea `.txt`.
+El fichero limpio final está en `dataset_home_real/all_data_72hours.txt`, con
+4.320 minutos y 17 columnas, desde 31/10 12:06 hasta 03/11 12:06. Red, almacén y
+revisión son campos opcionales: su ausencia permanece desconocida. Las columnas
+adicionales de escenarios o confirmaciones se excluyen de las entradas del modelo.
+El operador elige el archivo; Qwen no recibe acceso a rutas arbitrarias.
+
+```powershell
+python -m scripts.evaluate_final_72h
+python -m scripts.report_final_72h
+```
+
+La evaluación registrada utiliza el agente A y el modelo instalado, sin cambios
+de prompt ni reglas durante la tanda. El informe está en
+`temp_data/eval_72h_clean_2026-11-06/evaluacion_agente_metricas_72h.html`, junto con
+preguntas, referencias, respuestas sin editar, solicitudes/respuestas nativas de
+Ollama, auditoría y hash de origen. Son 26 consultas del módulo más un control
+temporal. La pregunta de composición Q27 se excluye del balance, y no se ejecuta
+el agente de conversación general. La ejecución previa sobre el fichero de
+`mariola` se conserva separada como anterior al archivo limpio.
+
+La revisión compara hechos con las herramientas, no mide precisión HAR sobre
+actividades anotadas. El balance guardado es 4 correctas, 5 parciales, 13
+incorrectas y 5 sin resolver. Los fallos detectados incluyen intervalos inválidos
+repetidos, confusión de medias con sumas, sustitución de reglas por observaciones
+aisladas y aceptación de texto con prefijo `Agente B:` tras consultas fallidas.
+La adaptación de entrada pasa 40 pruebas del módulo histórico/backend; eso no
+equivale a que el LLM cumpla correctamente el contrato en preguntas reales.

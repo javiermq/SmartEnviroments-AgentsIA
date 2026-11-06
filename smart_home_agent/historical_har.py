@@ -10,6 +10,7 @@ import hashlib
 import io
 import math
 from collections import Counter
+from statistics import median
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -26,6 +27,12 @@ SIGNALS = {
     'salon_consumo14_w': 'W', 'cocina_vasos13': 'binary',
     'cocina_platos4': 'binary', 'entrada_binario7': 'binary',
     WATCH+'bedtime': 'binary', WATCH+'network_evidence': 'code',
+}
+SOURCE_COLUMNS = {
+    'timestamp', 'timestamp_unix', 'fecha', 'minuto', 'watch_id', 'habitacion',
+    'ancla_minima', 'distancia_minima_m', *SIGNALS,
+    *(WATCH+k for k in ('battery_max_percent', 'charging_observed', 'ble_gateway',
+                       'ble_rssi_dbm', 'store', 'source_minute', 'revision')),
 }
 WARNINGS = [
     'Vacío es desconocido; no se interpolan ni arrastran valores.',
@@ -69,15 +76,23 @@ class History:
         self.har_rules = har_rules
         self.rows: dict[int, dict] = {}
         self.sources: list[dict] = []
+        def input_paths():
+            if self.directory.is_file():
+                return [self.directory]
+            daily = sorted(self.directory.glob('????-??-??.tsv'))
+            consolidated = self.directory/'all_data_72hours.txt'
+            if daily and consolidated.is_file():
+                raise ValueError('Hay export diario y consolidado: indica el archivo o directorio exacto')
+            return daily or ([consolidated] if consolidated.is_file() else [])
         for _ in range(3):
-            paths = sorted(self.directory.glob('????-??-??.tsv'))
+            paths = input_paths()
             if not paths:
-                raise FileNotFoundError('No hay TSV diarios en el directorio configurado')
+                raise FileNotFoundError('No hay export tabulado en la fuente configurada')
             try:
                 before = [(p.stat().st_size, p.stat().st_mtime_ns) for p in paths]
                 blobs = [p.read_bytes() for p in paths]
                 after = [(p.stat().st_size, p.stat().st_mtime_ns) for p in paths]
-                if before == after and paths == sorted(self.directory.glob('????-??-??.tsv')):
+                if before == after and paths == input_paths():
                     break
             except OSError:
                 continue
@@ -88,13 +103,15 @@ class History:
                 raise ValueError('TSV posiblemente incompleto: '+path.name)
             self.sources.append({'file': path.name, 'sha256': hashlib.sha256(blob).hexdigest()})
             reader = csv.DictReader(io.StringIO(blob.decode('utf-8-sig')), delimiter='\t')
-            required = {'timestamp', 'timestamp_unix', 'watch_id', 'habitacion',
-                        WATCH+'revision', WATCH+'store'} | set(SIGNALS)
+            # The clean 72h export has 17 columns and omits optional network/store metadata.
+            required = {'timestamp', 'timestamp_unix', 'watch_id', 'habitacion'} | (set(SIGNALS)-{WATCH+'network_evidence'})
             if not required <= set(reader.fieldnames or []):
                 raise ValueError('Esquema incompleto: '+path.name)
             for line, row in enumerate(reader, 2):
                 if None in row or any(v is None for v in row.values()):
                     raise ValueError('Fila incompleta: '+path.name)
+                # Extra scenario/annotation fields are not observations or agent inputs.
+                row = {k: v for k, v in row.items() if k in SOURCE_COLUMNS}
                 t = stamp(row['timestamp'])
                 if t != int(row['timestamp_unix']) or t % 60 or row['watch_id'] != 'watch_01':
                     raise ValueError('Timestamp o reloj incompatible')
@@ -104,12 +121,12 @@ class History:
                         raise ValueError('Binario distinto de 0/1: resolver en preprocesamiento externo')
                     if value is not None and SIGNALS[key] == 'code' and value not in (1, 2, 3, 4):
                         raise ValueError('Código de red fuera de esquema: resolver en preprocesamiento externo')
-                revision = int(row[WATCH+'revision'] or -1)
+                revision = int(row[WATCH+'revision']) if row.get(WATCH+'revision') else None
                 if row[WATCH+'steps'] and number(row, WATCH+'steps') < 0:
                     raise ValueError('Pasos negativos')
                 previous = self.rows.get(t)
                 provenance = {'file': path.name, 'line': line, 'revision': revision,
-                              'store': row[WATCH+'store']}
+                              'store': row.get(WATCH+'store') or None}
                 if previous:
                     raise ValueError(f'Minuto duplicado/conflictivo {iso(t)}: resolver en preprocesamiento externo')
                 self.rows[t] = dict(row, _source=provenance)
@@ -260,6 +277,75 @@ class History:
         from .har_rules import infer_activities
         return infer_activities(self, activity=activity, rules=self.har_rules, t0=t0,
                                 window=window, start=start, end=end, offset=offset, limit=limit)
+
+    def desviacion_mediana_movil(self, column: str, t0: str | None = None,
+                                 window_minutes: int | None = None) -> dict[str, Any]:
+        """Trailing observed median minus latest observed value, including current.
+
+        Humidity defaults to 2h and TV power to 24h. Available readings are used
+        even with a partial history; no density gate, carry-forward or interpolation.
+        """
+        defaults = {'bano_humedad7_pct': 120, 'salon_consumo14_w': 1440}
+        if column not in defaults:
+            raise ValueError('Referencia móvil disponible para humedad y potencia de la televisión.')
+        width = defaults[column] if window_minutes is None else window_minutes
+        if isinstance(width, bool) or not isinstance(width, int) or not 1 <= width <= 10080:
+            raise ValueError('window_minutes debe ser entero entre 1 y 10080.')
+        ref = stamp(t0) if t0 else self.latest
+        a = ref-width*60
+        points = [(t, value) for t, row in sorted(self.rows.items()) if a <= t < ref
+                  and (value := number(row, column)) is not None]
+        baseline = median(value for _, value in points) if points else None
+        latest = points[-1] if points else None
+        result = self.base(a, ref, ref)
+        result.update(column=column, window_minutes=width,
+                      formula='median_observed_window - current_value', includes_current_in_median=True,
+                      observed_values=len(points),
+                      available_export_minutes=sum(a <= t < ref for t in self.rows),
+                      median=baseline, current_value=latest[1] if latest else None,
+                      current_at=iso(latest[0]) if latest else None,
+                      current_age_minutes=(ref-latest[0])/60 if latest else None,
+                      first_observed_at=iso(points[0][0]) if points else None,
+                      median_minus_current=baseline-latest[1] if latest else None,
+                      status='available' if points else 'no_observations')
+        result['units'].update(level=SIGNALS[column],
+                               difference='percentage_points' if column == 'bano_humedad7_pct' else 'W')
+        return result
+
+    def analizar_cambios(self, column: str, t0: str | None = None, window: str = 'hoy',
+                         start: str | None = None, end: str | None = None,
+                         reference_minutes: int = 60) -> dict[str, Any]:
+        """Differences between real observed readings, without requiring dense sampling."""
+        if column not in SIGNALS or SIGNALS[column] in ('binary', 'code'):
+            raise ValueError('Los cambios requieren una señal numérica, no códigos/binarios.')
+        if isinstance(reference_minutes, bool) or not isinstance(reference_minutes, int) or not 1 <= reference_minutes <= 1440:
+            raise ValueError('reference_minutes debe estar entre 1 y 1440.')
+        a, b, ref = self.interval(t0, window, start, end)
+        points = [(t, v) for t, row in sorted(self.rows.items()) if a <= t < b
+                  and (v := number(row, column)) is not None]
+        previous = [(t, v) for t, row in sorted(self.rows.items()) if a-reference_minutes*60 <= t < a
+                    and (v := number(row, column)) is not None]
+        reference = previous[-1:] if points else []
+        chain = reference+points
+        def pair(p, q):
+            return {'from_at': iso(p[0]), 'to_at': iso(q[0]), 'previous': p[1], 'current': q[1],
+                    'difference': q[1]-p[1], 'elapsed_minutes': (q[0]-p[0])/60,
+                    'reference_before_window': p[0] < a}
+        changes = [pair(p, q) for p, q in zip(chain, chain[1:]) if 0 < q[0]-p[0] <= reference_minutes*60]
+        latest = changes[-1] if changes and changes[-1]['to_at'] == iso(points[-1][0]) else None
+        increases = [c for c in changes if c['difference'] > 0]
+        decreases = [c for c in changes if c['difference'] < 0]
+        result = self.base(a, b, ref)
+        unit = 'steps/min' if column == WATCH+'steps' else SIGNALS[column]
+        result.update(column=column, observed_minutes=len(points), reference_minutes=reference_minutes,
+                      latest_change=latest,
+                      largest_rise=max(increases, key=lambda c: c['difference']) if increases else None,
+                      largest_drop=min(decreases, key=lambda c: c['difference']) if decreases else None,
+                      first_last_difference=points[-1][1]-points[0][1] if len(points) >= 2 else None,
+                      status='observed_change' if latest is not None else 'insufficient_reference')
+        result['units'].update(level=unit, difference='percentage_points' if unit == '%' else unit)
+        result['warnings'].append('Diferencias de lecturas observadas; no implican estado continuo entre ellas ni se rellenan huecos.')
+        return result
 
     def analizar_tendencia(self, column: str, window_minutes: int = 10,
                           t0: str | None = None, min_coverage: float = .8) -> dict[str, Any]:

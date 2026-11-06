@@ -13,7 +13,7 @@ from .historical_har import History, SIGNALS, iso, stamp
 from .har_rules import HarRules, ACTIVITIES
 
 
-def schemas() -> list[dict]:
+def legacy_schemas() -> list[dict]:
     common = {
         't0': {'type': 'string', 'description': 'ISO-8601 con desfase Europe/Madrid; nunca posterior al t0 de sistema'},
         'window': {'type': 'string', 'enum': ['hoy', 'ayer', 'ultimas_24h']},
@@ -50,7 +50,7 @@ def schemas() -> list[dict]:
                            'required': required+['reason']}}} for name, description, extra, required in definitions]
 
 
-class HistoricalAgent:
+class LegacyHistoricalAgent:
     def __init__(self, directory: Path | str, *,
                  har_rules: HarRules | None = None,
                  model: str | None = None, url: str | None = None,
@@ -124,7 +124,7 @@ class HistoricalAgent:
         last_error = None
         try:
             while True:
-                assistant = self._request(messages, schemas() if count < self.max_calls else [])
+                assistant = self._request(messages, legacy_schemas() if count < self.max_calls else [])
                 assistant['role'] = 'assistant'
                 messages.append(assistant)
                 calls = assistant.get('tool_calls', [])
@@ -160,7 +160,7 @@ class HistoricalAgent:
                         reason = args.pop('reason', '')
                         if not isinstance(reason, str) or not reason.strip():
                             raise ValueError('Explica qué duda resuelve esta llamada')
-                        allowed = {s['function']['name']: s['function']['parameters']['properties'] for s in schemas()}
+                        allowed = {s['function']['name']: s['function']['parameters']['properties'] for s in legacy_schemas()}
                         if name not in allowed or set(args)-set(allowed[name]):
                             raise ValueError('Herramienta o parámetros no permitidos')
                         if not summarized and name != 'resumir_intervalo':
@@ -192,11 +192,19 @@ class HistoricalAgent:
             raise
 
 
+# Public agent uses bound temporal context; legacy remains available for baseline replay.
+from .metrics_har_agent import MetricsHarAgent as HistoricalAgent, schemas
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--data', type=Path, default=Path('dataset_home_real/mariola'))
+    parser.add_argument('--data', type=Path, default=Path('dataset_home_real/all_data_72hours.txt'))
     parser.add_argument('--t0')
+    parser.add_argument('--question-time', help='Timestamp del registro de la pregunta; referencia por defecto si se omite t0')
     parser.add_argument('--model')
+    temporal = parser.add_mutually_exclusive_group()
+    temporal.add_argument('--window', choices=['hoy', 'ayer', 'ultimas_24h'])
+    temporal.add_argument('--window-minutes', type=int)
     parser.add_argument('--har-rules', type=Path, help='JSON con parámetros explícitos de HarRules')
     parser.add_argument('--activities', choices=['all', *ACTIVITIES], help='Reglas HAR solo Python, sin Ollama')
     parser.add_argument('--max-calls', type=int, default=6)
@@ -205,13 +213,19 @@ def main():
     parser.add_argument('question', nargs='?', default='¿Qué actividades están respaldadas por los datos de hoy?')
     args = parser.parse_args()
     rules = HarRules(**json.loads(args.har_rules.read_text(encoding='utf-8'))) if args.har_rules else HarRules()
-    if args.summary:
-        print(json.dumps(History(args.data).resumir_intervalo(t0=args.t0), ensure_ascii=False, indent=2))
-    elif args.activities:
-        print(json.dumps(History(args.data, rules).inferir_actividades(activity=args.activities, t0=args.t0), ensure_ascii=False, indent=2))
+    if args.summary or args.activities:
+        from .query_time import resolve_window, reference_time
+        history = History(args.data, rules)
+        cutoff, _ = reference_time(args.t0, args.question_time, history.latest)
+        bound = resolve_window(args.question, cutoff,
+                               window=args.window, window_minutes=args.window_minutes)
+        params = dict(t0=iso(bound.cutoff), start=iso(bound.start), end=iso(bound.end))
+        result = history.resumir_intervalo(**params) if args.summary else history.inferir_actividades(activity=args.activities, **params)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print(HistoricalAgent(args.data, har_rules=rules, model=args.model, max_calls=args.max_calls,
-                              audit=args.audit).respond(args.question, args.t0))
+                              audit=args.audit).respond(args.question, args.t0, question_time=args.question_time, window=args.window,
+                                                       window_minutes=args.window_minutes))
 
 
 if __name__ == '__main__':
