@@ -1,0 +1,134 @@
+\documentclass[a4paper,twoside]{article}
+
+\usepackage{epsfig}
+\usepackage{subcaption}
+\usepackage{calc}
+\usepackage{amssymb}
+\usepackage{amstext}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{multicol}
+\usepackage{pslatex}
+\usepackage[utf8]{inputenc}
+\usepackage{apalike}
+\usepackage{algorithm2e}
+\usepackage[bottom]{footmisc}
+\usepackage{SCITEPRESS}     % Please add other packages that you may need BEFORE the SCITEPRESS.sty package.
+
+\begin{document}
+
+\title{A Multimodal Sensor--HAR--Language Architecture for Goal-Aware User Interaction in Edge--Fog Smart Environments}
+
+\author{\authorname{First Author Name\sup{1}\orcidAuthor{0000-0000-0000-0000}, Second Author Name\sup{1}\orcidAuthor{0000-0000-0000-0000} and Third Author Name\sup{2}\orcidAuthor{0000-0000-0000-0000}}
+\affiliation{\sup{1}Institute of Problem Solving, XYZ University, My Street, MyTown, MyCountry}
+\affiliation{\sup{2}Department of Computing, Main University, MySecondTown, MyCountry}
+\email{\{first\_author, second\_author\}@ips.xyz.edu, third\_author@dc.mu.edu}
+}
+
+\keywords{ multimodal sensing; large language models; human activity recognition; contextual localization; temporal context segmentation; user goals; edge--fog computing; smart environments}
+
+\abstract{Context-aware user interaction in smart environments requires sensor observations to be interpreted in relation to human activities, spatial context, and individual goals. This white paper organizes multimodal sensor integration, human activity recognition (HAR), contextual localization, temporal context segmentation, user goals, and language-based interaction into an open, adaptable sensor--HAR--language reference architecture. Sensor observations, activity estimates, and spatial information are aligned temporally and segmented into context episodes that capture relevant changes. A large language model (LLM) interprets these episodes alongside explicit user goals and preferences to support context-grounded assistance. Edge devices acquire and preprocess observations, while a local fog node integrates context and hosts language-model inference. The architecture accommodates different sensing technologies, interaction devices, and deployment configurations. The proposed shared-apartment implementation combines ultra-wideband (UWB) localization, binary ambient sensors, Android Wear, Reachy Mini, and locally deployed Qwen3 4B Instruct. An evaluation in a real residential setting is shown to assess contextual consistency, temporal segmentation, sensor-grounded interpretation, goal alignment, and interaction latency.}
+
+\onecolumn \maketitle \normalsize \setcounter{footnote}{0} \vfill
+
+\section{\uppercase{Introduction}}
+\label{sec:introduction}
+
+Smart environments combine ambient sensors, wearable devices, and computational services to analyse everyday activities and support people in their living spaces~\cite{cook2007smart}. Wearables provide a mobile interface for sensing and interaction, while social robots offer an embodied channel for assistance; research on healthcare robots highlights the importance of user acceptance in their deployment~\cite{broadbent2009acceptance}. Edge--fog architectures provide a complementary computational foundation by placing processing closer to sensor sources, with latency, bandwidth, privacy, and resource constraints shaping deployment choices~\cite{shi2016edge}. Integrating these components creates opportunities for assistance informed by daily routines, mobility, and the context in which an interaction takes place.
+
+Human activity recognition (HAR) provides an intermediate layer between physical measurements and contextual interpretation. Its processing chain encompasses acquisition, preprocessing, segmentation, feature extraction, and classification~\cite{bulling2014tutorial}. Two complementary approaches can support this interpretation. Data-driven methods learn activity patterns from sensor observations: for example, convolutional and recurrent neural networks can learn features and temporal dependencies from multimodal wearable data~\cite{ordonez2016deep}. Knowledge-driven methods encode domain concepts and relationships explicitly, using rules, ontologies, or other semantic representations. Knowledge graphs and fuzzy logic have been combined to derive interpretable indicators of daily behaviour from heterogeneous sensor streams~\cite{polo2025health}. These approaches offer different ways to connect sensor observations with meaningful descriptions, which must then be integrated with the wider context of the user.
+
+Spatial information complements activity estimates, particularly in shared homes where ambient sensor events cannot readily be attributed to a specific resident~\cite{liu2007positioning,poloMultiOccupancy}. Ultra-wideband (UWB) localisation can help associate nearby users with environmental events and characterise caregiver proximity~\cite{polo2024social}. Its integration into consumer smartwatches also provides a basis for wearable contextual sensing, subject to practical accuracy, latency, and battery constraints~\cite{anguita2025uwb}. Combining wearable and ambient observations with interaction devices such as social robots therefore requires a shared representation of who is present, what activity is inferred, and how the context changes over time. Social robots can use this context to support personalised activities and adapt how they engage users. For example, Sorrentino et al., including Laura Fiorini and Filippo Cavallo, investigated engagement with personalised activities delivered by the CloudIA robot in two nursing facilities, highlighting the relevance of user perception and personalisation in socially assistive robotics~\cite{sorrentino2023cloudia}.
+
+However, sensing and activity recognition alone do not determine how personalised assistance should be delivered. Observations must be interpreted in relation to the person, the environment, and the purpose of an interaction~\cite{dey2001context}. Large language models (LLMs) introduce an emerging route towards connecting sensor-derived information with language: SensorLLM, for example, aligns motion-sensor time series with textual descriptions for HAR~\cite{li2025sensorllm}. In embodied agents, SayCan and ReAct demonstrate complementary ways of connecting language-based reasoning to available capabilities and external information~\cite{ahn2022saycan,yao2023react}. Within smart environments, Polo-Rodr{\'i}guez et al.~\cite{polo2025chatbots} combine UWB localisation and HAR with an LLM-powered chatbot to generate context-aware interactions and recommendations. These developments motivate further investigation of LLMs for context-aware assistance, while leaving open how reliably they can support continuous interaction in residential settings.
+
+Continuous goal-oriented coaching builds on research into sustained conversational support and context-adaptive interventions. Bickmore et al.~\cite{bickmore2013interventions} investigated daily interactions with conversational agents to support physical activity and dietary behaviour over two months. Complementarily, the just-in-time adaptive intervention framework relates intervention decisions to changing individual and contextual states, with explicit decision points, tailoring variables, intervention options, and decision rules~\cite{nahumshani2018jitai}. These studies motivate linking user goals with evolving contextual information when deciding whether, when, and how to provide support. For the architecture proposed here, a shared contextual representation connects multimodal sensing, temporal interpretation, and language-based assistance. In this work, context episodes organise temporally aligned observations, activity estimates, and spatial information around relevant changes. These episodes provide the evidence that an LLM interprets alongside user goals and preferences, allowing contextual consistency and goal alignment to be assessed explicitly.
+
+This paper proposes an open, adaptable sensor--HAR--language reference architecture for goal-aware user interaction in edge--fog smart environments. Edge devices acquire and preprocess heterogeneous observations, while a local fog node integrates context, segments it into episodes, and hosts language-model inference. The architecture separates sensing, HAR, contextual localisation, temporal segmentation, goal representation, and interaction, allowing different sensing technologies and interaction devices to be incorporated within a common processing flow.
+
+The main contributions are as follows:
+\begin{itemize}
+    \item We define a reference architecture linking multimodal sensing and HAR to language-based interaction through temporally organised context episodes.
+    \item We incorporate explicit user goals and preferences into episode interpretation to support continuous goal-oriented assistance, with goal alignment and sensor consistency as evaluation dimensions.
+    \item We describe a proposed shared-apartment implementation combining UWB localisation, binary ambient sensors, Android Wear, Reachy Mini, and locally deployed Qwen3 4B Instruct 2507, together with a planned single-participant evaluation of contextual consistency, temporal segmentation, sensor-grounded interpretation, goal alignment, and interaction latency.
+\end{itemize}
+This initial evaluation is intended to assess feasibility and integration limitations; broader conclusions about effectiveness and generalisation will require subsequent studies.
+
+
+\section{\uppercase{Methodology}}
+\label{sec:methodology}
+
+
+\subsection{Reference Architecture for AI-Enabled Smart Environments}
+\label{subsec:general-architecture}
+
+We propose a technology-independent reference architecture for integrating heterogeneous sensing, contextual analysis, and intelligent assistance in smart environments. As illustrated in Fig.~\ref{fig:architecture}, the architecture comprises four interconnected layers: (i) Sensing and Actuation, (ii) Edge--Fog Infrastructure, (iii) Pattern and Action Services, and (iv) Intelligent Care. These layers establish a bidirectional flow in which sensor observations are processed into contextual information, interpreted by intelligent services, and potentially translated into interactions or actions. The architecture is modular, allowing individual deployments to select sensing technologies, processing methods, and assistance functionalities according to their requirements.
+
+\paragraph{Sensing and Actuation Layer.}
+This layer encompasses heterogeneous devices deployed in the environment or carried by its occupants. Ambient binary sensors capture events such as motion, door opening, or object usage, typically using low-power protocols such as Zigbee or Z-Wave and platforms such as Home Assistant~\cite{homeassistantZha,homeassistantZwave}. Wearable devices complement these observations with inertial measurements, activity indicators, and available physiological signals. Additional modalities may include cameras, microphones, or radio-based positioning devices. Robotic platforms combine sensing capabilities with embodied interaction through speech, gestures, or movement~\cite{sorrentino2023cloudia}. Actuation devices, including smart lighting, displays, speakers, and household controllers, enable interaction with the environment. The architecture does not require any particular sensing modality, allowing deployments to balance functionality, computational requirements, and privacy considerations.
+
+\paragraph{Edge--Fog Infrastructure and Middleware.}
+The infrastructure layer provides communication and distributed processing capabilities. Edge nodes acquire sensor observations and may perform filtering, feature extraction, or lightweight inference. Fog nodes can aggregate information from multiple sources, host more demanding processing services, and coordinate their execution~\cite{shi2016edge}. The distribution of these functions depends on device capabilities, connectivity, latency requirements, and data sensitivity.
+
+A communication middleware enables interoperability through event-based and service-oriented interfaces. Publish/subscribe mechanisms such as MQTT~\cite{oasis2019mqtt} or IceStorm~\cite{zerocIcestorm} support asynchronous event distribution, while service interfaces allow components to request information or execute actions. Sensor observations, processed events, and device commands can therefore be exchanged independently of the underlying hardware and communication protocols. Historical observations and derived events may also be stored in a database for subsequent queries and analysis.
+
+\paragraph{Pattern and Action Services Layer.}
+This layer provides extensible services for interpreting sensor observations and supporting context-aware actions. Services may follow knowledge-driven (KD), data-driven (DD), or hybrid approaches. Knowledge-driven methods use explicit rules, expert knowledge, or semantic representations, which can be configured or refined with input from users and caregivers. Data-driven methods employ statistical or machine learning models, potentially using historical information stored in the system database to identify patterns or estimate relevant states. Hybrid approaches can combine learned predictions with predefined contextual constraints.
+
+Representative services include Human Activity Recognition (HAR), indoor localisation and tracking, and alert supervision. HAR transforms sensor observations into estimates of daily activities using approaches ranging from explicit rules to temporal learning models~\cite{ordonez2016deep,polo2025health}. Indoor localisation provides spatial information about occupants or devices through technologies such as BLE, UWB, or visual tracking~\cite{faragher2015ble,dardari2009ranging,zhang2022bytetrack}. Supervision services evaluate predefined conditions or detected behavioural deviations to generate relevant notifications or alerts. These functionalities are illustrative rather than exhaustive, and additional services can be incorporated through common interfaces. Their outputs provide structured contextual information, including temporal references and confidence indicators when available.
+
+\paragraph{Intelligent Care Layer.}
+The upper layer integrates contextual monitoring, LLM-based interaction, and human participation. Monitoring components provide an overview of recognised activities, environmental states, and generated alerts, supporting the interpretation of daily routines by users and caregivers. LLM-based agents can access available contextual services to answer questions, explain observations, generate summaries, or suggest actions based on the current situation. Previous work on context-aware conversational systems motivates the integration of HAR and localisation information into language-based interaction~\cite{polo2025chatbots}.
+
+Users and caregivers remain part of the assistance process, providing preferences, defining relevant supervision rules, and reviewing system-generated information. The LLM operates over the contextual information exposed by the underlying services rather than directly processing all raw sensor streams. Explicit rules can handle predefined alerts independently of generative reasoning, while conversational assistance provides a more flexible interface for interpreting and interacting with the environment.
+
+\paragraph{Closed-Loop Interaction and Assistance.}
+The architecture supports a feedback loop between sensing, contextual interpretation, human interaction, and actuation. For example, an extended period of inactivity detected through HAR and supervision services may trigger a notification or a contextual suggestion delivered through a wearable or companion robot. Similarly, a user may ask the LLM about recent activities or request control of a connected household device. Such requests are forwarded to the corresponding services or actuators through the middleware, subject to the available permissions and device capabilities. Subsequent sensor observations can update the contextual state, supporting continued monitoring and further interaction. This bidirectional organisation enables the integration of heterogeneous devices and intelligent services without imposing a fixed hardware configuration or a specific assistance strategy.
+
+
+\begin{figure*}[t]
+    \centering
+ %   \includegraphics[width=\textwidth]{architecture.png}
+    \caption{Reference architecture for intelligent care,
+    with bidirectional information and command flows
+    between adjacent layers.}
+    \label{fig:architecture}
+\end{figure*}
+
+
+\section{Case Study}
+\label{sec:case-study}
+
+To illustrate the proposed architecture, we consider a multimodal smart home scenario integrating ambient sensing, wearable activity monitoring, indoor localisation, and conversational robotic assistance. The case study focuses on recognising the presence and activities of a resident, combining information from heterogeneous sources, and enabling natural language queries about their daily behaviour.
+
+\paragraph{Experimental setup and sensing devices.}
+The experimental environment integrates four complementary sensing technologies. A Google Pixel Watch provides wearable-derived information, including physical activity indicators and available physiological measurements. Quorvo Ultra-Wideband (UWB) development boards support indoor positioning and spatial tracking, while Aqara Zigbee sensors capture environmental events such as motion and door opening. A Reachy Mini robot provides an embodied interaction interface, using its camera for facial recognition and its audio capabilities for spoken interaction. These sources provide complementary information about user identity, location, activity, and environmental context. Sensor information is collected through local interfaces and integrated using an MQTT-based communication infrastructure, with Home Assistant supporting the management of compatible smart home devices. The resulting observations can be combined to establish a contextual representation of the resident's activities within the home.
+
+\paragraph{LLM-based reasoning and agent integration.}
+The intelligent assistance component is based on a locally deployed Qwen language model, integrated with a function-calling mechanism that provides structured access to the underlying sensing and analysis services. Available functions support queries about wearable activity indicators, HAR predictions, indoor localisation, and historical sensor events over specified time intervals. Rather than processing raw multimodal streams directly, the LLM receives contextual information retrieved through these interfaces. The system incorporates two cooperating agents: a \textit{Semantic Perception Agent}, responsible for retrieving and organising multimodal observations into contextual information, and an \textit{Assistive Reasoning Agent}, which interprets this information, manages conversational requests, and selects appropriate service functions. Through Reachy Mini, the resident can ask questions about recent activities, time spent in different areas of the home, or daily physical activity. The same architecture also allows the reasoning agent to request context-dependent notifications or interactions through the available devices, illustrating the bidirectional communication between sensing, contextual reasoning, and assistance.
+
+
+24 de 27 respuestas visibles coherentes con el motor
+
+\section{\uppercase{Conclusions}}
+\label{sec:conclusion}
+
+
+
+
+\section*{\uppercase{Acknowledgements}}
+
+Projects
+
+
+\bibliographystyle{apalike}
+{\small
+\bibliography{example}}
+
+
+\section*{\uppercase{Appendix}}
+
+If any, the appendix should appear directly after the references without numbering, and not on a new page. To do so please use the following command: \textit{$\backslash$section*\{APPENDIX\}}
+
+\end{document}
+
