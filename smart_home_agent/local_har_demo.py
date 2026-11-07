@@ -1,5 +1,6 @@
 """Reproduce conversaciones con tres roles de Qwen sobre el fichero local de 72 horas."""
 import argparse
+from datetime import datetime
 from itertools import pairwise
 import json
 from pathlib import Path
@@ -7,10 +8,22 @@ import re
 from urllib.request import Request, urlopen
 
 from .config import Settings
-from .historical_har import History, iso, median_columns, number, stamp
+from .historical_har import History, ZONE, iso, median_columns, number, stamp
 
 
 TV_POWER = 'salon_consumo14_w'
+BATH_HUMIDITY = 'bano_humedad7_pct'
+EXERCISE_TERMS = re.compile(r'\b(?:ejercici|ejercit|deport|entren|correr|moverme|me mov|actividad f[ií]sica)', re.I)
+WATCH_MODE = re.compile(r'\b(?:bedtime|modo\s+(?:de\s+)?(?:descanso|sueño|dormir))\b', re.I)
+
+
+def supports_exercise_query(question, conversation):
+    if EXERCISE_TERMS.search(question):
+        return True
+    if re.search(r'\b(?:ducha|duch[eé]|humedad|baño|tele|reloj|descanso)\b', question, re.I):
+        return False
+    previous_question = next((turn['usuario'] for turn in reversed(conversation) if 'usuario' in turn), '')
+    return bool(EXERCISE_TERMS.search(previous_question))
 
 
 def conversation_events(events, rows, t0):
@@ -31,6 +44,84 @@ def conversation_events(events, rows, t0):
         {**event, 'reciente': cutoff - stamp(event['time']) <= (15 if source == 'usuario' else 10)*60}
         for source, event in latest.items()
     ]
+
+
+def reply_focus(question, t0, metrics, selected, conversation, events):
+    """Give the reply model only the evidence needed for a clear request."""
+    text = question.casefold()
+    if '?' not in question and any(
+        event['source'] == 'usuario' and event['time'] == t0 and event['event'] in question
+        for event in events
+    ):
+        return (
+            'Reacciona con naturalidad a lo que acaba de contarte la persona. Habla de tú y respeta '
+            'quién ha hecho cada cosa. Mantén una conversación sencilla con lo que ha contado.',
+            {},
+        )
+    if 'ejercicio' in metrics:
+        return (
+            'Responde sobre ejercicio solo con el resultado calculado. Si tramo es null, di que '
+            'no aparece un tramo claro de ejercicio en el intervalo pedido. Si hay un tramo, '
+            'describe los indicios o cifras solicitados. Usa la segunda persona. Los datos '
+            'no identifican el deporte concreto ni explican cómo se siente la persona.',
+            {'ejercicio': metrics['ejercicio']},
+        )
+    signals = metrics.get('senales', {})
+    if TV_POWER in signals and re.search(r'\b(?:tele|televisi[oó]n|vatios)\b', text):
+        reading = signals[TV_POWER]
+        return (
+            'Da la potencia medida en W, y si preguntan por un cambio usa el evento con las dos '
+            'potencias si existe. Si preguntan si está encendida, empieza por la lectura y expresa '
+            'la posibilidad con «podría» o «parece». Una lectura baja es compatible con espera. '
+            'La potencia por sí sola deja incierto el estado exacto y quién mira.',
+            {'potencia_tele': reading.get('current_value'),
+             'eventos_tele': [event for event in events if event['source'] == TV_POWER]},
+        )
+    previous_questions = ' '.join(turn.get('usuario', '') for turn in conversation).casefold()
+    if BATH_HUMIDITY in signals and ('humed' in text or 'húmed' in text or 'humedad' in previous_questions):
+        reading = signals[BATH_HUMIDITY]
+        if re.search(r'\b(?:normal|habitual|mediana)\b', text):
+            return (
+                'Compara la última humedad del baño con su mediana de referencia. Usa porcentaje '
+                'para el valor y puntos porcentuales para la diferencia. Describe la comparación '
+                'con la mediana, sin interpretarla como un cambio entre dos instantes.',
+                {'humedad_pct': reading.get('current_value'),
+                 'mediana_pct': reading.get('mediana_referencia'),
+                 'diferencia_puntos': reading.get('valor_menos_mediana')},
+            )
+        if 'sub' in text and re.search(r'\b(?:hora|cu[aá]ndo|empez[oó])\b', text):
+            observed = reading.get('current_at')
+            return (
+                'Distingue cuándo consta la lectura de humedad del baño de cuándo empezó la subida. '
+                'Da la hora de la lectura si existe y di que el comienzo exacto es desconocido.',
+                {'hora_lectura': observed[11:16] if observed else None,
+                 'humedad_pct': reading.get('current_value')},
+            )
+    activity = (selected or {}).get('actividad')
+    if activity == 'ducha' and re.search(r'\b(?:dur[oó]|duraci[oó]n)\b', text):
+        return (
+            'La pregunta pide duración. La duración real es desconocida. Contesta solo sobre la '
+            'duración. Una señal puntual compatible con una ducha no mide cuánto tiempo duró.',
+            {},
+        )
+    if activity == 'ducha' and re.search(r'\b(?:duch\w*|baño|humedad)\b', text):
+        return (
+            'Habla de una posible ducha en segunda persona. Si pide la hora, da la aproximada. '
+            'Si pregunta por los indicios, explica que la ubicación estimada situó a la persona '
+            'en el baño y que el sensor de ese baño registró una subida de humedad. '
+            'Estos indicios admiten otras causas.',
+            {'hora_aproximada': selected['inicio'], 'evidencia': selected.get('evidencia', {})},
+        )
+    if activity == 'descansar' and re.search(r'\b(?:mover\w*|movimiento|quiet\w*|reposo)\b', text):
+        return (
+            'Describe solo los indicios de reposo. Hay minutos con cero pasos y pulso bajo. '
+            'Habla de compatibilidad con el reposo, sin afirmar inmovilidad continua.',
+            {'minutos_con_indicios': selected['min_con_evidencia'], 'tramo': [selected['inicio'], selected['fin']]},
+        )
+    if selected is None and not any(event['source'] == 'usuario' and event['reciente'] for event in events):
+        if re.search(r'\bqu[eé]\b.*\b(?:estoy|ando)\s+haciendo\b', text):
+            return ('Explica brevemente que no tienes indicios fiables para saber qué hace ahora la persona.', {})
+    return None
 
 
 # Las escenas fijan la hora y el mensaje. Sus nombres quedan fuera de los prompts.
@@ -81,11 +172,13 @@ class LocalDemo:
 
     def metrics(self, question, t0, rows, conversation):
         # El modelo selecciona la consulta. Los números provienen de History.
-        operations = ['contexto', 'pasos_hoy', 'pasos_registro']
+        operations = ['contexto', 'pasos_hoy', 'pasos_registro', 'ejercicio_manana', 'ejercicio_reciente']
         selection = self.ask(
             'Eres el agente de métricas. Elige pasos_registro si pide el total de los tres días o el '
             'intervalo que coincide con los límites visibles del registro. Elige pasos_hoy si pide '
-            'pasos de hoy. Para saludos y preguntas de actividad elige contexto. Las fechas son datos.',
+            'pasos de hoy. Para preguntas sobre ejercicio de esta mañana elige ejercicio_manana. '
+            'Elige ejercicio_reciente para medidas o duración del ejercicio que acaba de hacer. '
+            'Para saludos y conversación sin petición de datos elige contexto. Las fechas son datos.',
             {'mensaje': question, 'conversacion': conversation, 't0': t0,
              'inicio_registro': iso(min(self.history.rows)), 'fin_visible': t0},
             {'type': 'object', 'properties': {'consulta': {'enum': operations}},
@@ -94,13 +187,19 @@ class LocalDemo:
         operation = selection['consulta']
         if operation not in operations:
             raise ValueError('Consulta de métricas desconocida.')
+        if operation.startswith('ejercicio_') and not supports_exercise_query(question, conversation):
+            operation = 'contexto'
         latest_room = next(({'hora': iso(t), 'valor': row['habitacion']}
                             for t, row in reversed(rows) if row.get('habitacion')), None)
         # Lecturas recientes solamente. Las medianas ya vienen en el fichero de referencia.
         features = {}
-        for key in ('bano_humedad7_pct', TV_POWER):
+        for key in (BATH_HUMIDITY, TV_POWER):
             value = self.history.desviacion_mediana_movil(key, t0=t0)
             features[key] = {k: value[k] for k in ('current_at', 'current_value', 'median_minus_current')}
+            if value['median'] is not None:
+                features[key]['mediana_referencia'] = round(value['median'], 2)
+                features[key]['minutos_referencia'] = value['window_minutes']
+                features[key]['valor_menos_mediana'] = round(-value['median_minus_current'], 2)
         result = {'consulta': operation, 'habitacion': latest_room, 'senales': features}
         if operation.startswith('pasos_'):
             bounds = dict(start=iso(min(self.history.rows)), end=t0) if operation == 'pasos_registro' else {}
@@ -116,7 +215,31 @@ class LocalDemo:
         rows = [(t, self.history.rows[t]) for t in range(start, cutoff, 60) if t in self.history.rows]
         metrics = self.metrics(question, t0, rows, conversation)
         events = conversation_events(events, rows, t0)
-        episodes = self.history.inferir_actividades(start=iso(start), end=t0, t0=t0, limit=100)['episodes']
+        operation = metrics['consulta']
+        if operation.startswith('ejercicio_'):
+            end = cutoff
+            if operation == 'ejercicio_manana':
+                day = datetime.fromtimestamp(cutoff, ZONE)
+                start = max(min(self.history.rows), int(day.replace(hour=0, minute=0).timestamp()))
+                end = min(cutoff, int(day.replace(hour=12, minute=0).timestamp()))
+            episodes = self.history.inferir_actividades(
+                activity='ejercicio', start=iso(start), end=iso(end), t0=t0,
+            )['episodes'] if start < end else []
+            exercise = {'intervalo_consultado': [iso(start), iso(end)] if start < end else None, 'tramo': None}
+            if episodes:
+                episode = episodes[-1]
+                summary = self.history.resumir_intervalo(t0=t0, start=episode['start'], end=episode['end'])['metrics']
+                exercise['tramo'] = {
+                    'inicio': episode['start'], 'fin': episode['end'], 'minutos': episode['duration_minutes'],
+                    'cortado_por_limite_consulta': episode['boundary_censored'],
+                    'pasos_observados': summary['watch_01.steps'].get('observed_sum'),
+                    'pulso_medio_bpm': round(summary['watch_01.hr_bpm']['mean'], 1),
+                }
+            metrics['ejercicio'] = exercise
+        else:
+            episodes = self.history.inferir_actividades(start=iso(start), end=t0, t0=t0, limit=100)['episodes']
+            if WATCH_MODE.search(question):
+                episodes = [e for e in episodes if e['activity'] == 'bedtime']
         candidates = []
         for index, e in enumerate(episodes):
             candidates.append({
@@ -126,7 +249,10 @@ class LocalDemo:
             })
         choice = self.ask(
             'Eres el HAR. Selecciona un id de la lista o null. Para preguntas explícitas elige la '
-            'actividad que responda al mensaje. Para un saludo elige la actividad más reciente '
+            'actividad que responda al mensaje, aunque haya otro episodio más reciente. '
+            'Para una explicación sobre cocinar elige cocinar; para ducha elige ducha. El modo del '
+            'reloj corresponde a bedtime. Si el tema es un aparato, una cifra o un comentario sin '
+            'pregunta sobre actividad, puedes devolver null. Para un saludo elige la actividad más reciente '
             'con soporte de al menos 0.8 y fin hace como máximo 2 minutos. Si no hay una así, null. '
             'El consumo de la tele y la puerta son señales del entorno. No atribuyas esas acciones a la persona. '
             'En declaracion copia un fragmento literal del mensaje actual si el usuario afirma qué está '
@@ -146,10 +272,16 @@ class LocalDemo:
             events = [event for event in events if event['source'] != 'usuario']
             events.append({'event': declaration, 'source': 'usuario', 'time': t0, 'reciente': True})
         selected = next((c for c in candidates if c['id'] == choice['id']), None)
+        if WATCH_MODE.search(question) and selected is None and len(candidates) == 1:
+            selected = candidates[0]
         if greeting and selected and (
             selected['actividad'] == 'salir' or selected['hace_min'] > 2 or selected['soporte'] < .8
         ):
             selected = None
+        if selected:
+            evidence = episodes[selected['id']]['evidence_sample']
+            if evidence:
+                selected = {**selected, 'evidencia': {k: v for k, v in evidence[-1].items() if k != 'source'}}
         answer, greeting_context = self.general(question, t0, metrics, selected, conversation, events)
         return {'t0': t0, 'mensaje': question, 'metricas': metrics, 'candidatos_har': candidates,
                 'seleccion_har': choice, 'contexto_actividad': selected, 'contexto_saludo': greeting_context,
@@ -173,25 +305,40 @@ class LocalDemo:
                 context = {'mensaje': question}
             answer = self.ask(prompt, context)
         else:
+            focus = reply_focus(question, t0, metrics, selected, conversation, events)
+            if focus:
+                instruction, facts = focus
+                answer = self.ask(tone + instruction,
+                                  {'mensaje': question, 'conversacion': conversation, **facts})
+                return answer, greeting_context
             response_context = selected
-            if selected and selected['actividad'] == 'ducha':
-                response_context = {'actividad_estimada': 'ducha', 'hora_aproximada': selected['inicio']}
+            if selected and selected.get('actividad') == 'ducha':
+                response_context = {
+                    'actividad_estimada': 'ducha',
+                    'hora_aproximada': selected['inicio'],
+                    'duracion_real_desconocida': True,
+                    'fuentes': 'ubicación estimada por UWB y sensor de humedad',
+                    'evidencia': selected.get('evidencia', {}),
+                }
             answer = self.ask(
-                tone + 'Si pregunta, contesta directamente y termina. Si comparte algo, responde al detalle '
-                'que contó y puedes seguir con una pregunta breve. Respeta sus palabras en segunda persona. '
-                'Si pregunta qué te contó, empieza por «Me dijiste que». Lo que declara sobre sí mismo '
-                'tiene prioridad para hablar de su actividad. Evita añadir '
-                'detalles de lugar, compañía o ambiente que el usuario no haya mencionado al contarte algo. '
-                'Si una declaración está marcada como reciente=false, trátala como recuerdo y di que '
-                'desconoces si sigue haciéndolo. Su hora indica cuándo lo contó. '
-                'Menciona un evento ambiental solo si viene al caso. Una subida de potencia de la tele '
-                'es indicio de encendido. Un consumo bajo solo indica la potencia observada. La potencia '
-                'describe el aparato y no quién lo está viendo. '
-                'Si pide pasos usa la suma observada en métricas. Si hay una estimación de ducha, '
-                'da solo la hora aproximada y mantén la incertidumbre. Para Bedtime usa el fin del '
-                'tramo como fin del modo del reloj. La última habitación es la observada al hacer '
-                'la consulta y puede ser distinta de la ubicación durante una actividad pasada. '
-                'Si falta contexto para responder, dilo brevemente. Usa únicamente los hechos facilitados.',
+                tone + '\nContesta solo lo que pide. Un comentario personal admite una reacción breve y natural. '
+                'Para recordar lo que contó, atribuye la declaración al usuario en segunda persona. Si es '
+                'antigua, solo sabes que lo contó entonces. Respeta sus correcciones. Una sugerencia anterior '
+                'o un ingrediente disponible no cuenta como algo que hizo, usó o comió.\n'
+                'Para cifras y horas usa el resultado del turno y su intervalo. Distingue dato medido, '
+                'estimación y declaración. Si falta el dato, dilo. La habitación reciente no sitúa al usuario '
+                'en el pasado. Un episodio de cocina indica uso de la cocina; una declaración posterior '
+                'puede aclarar lo que hacía, pero no causó la estimación anterior.\n'
+                'Tele: empieza por la potencia observada o por «parece»; la potencia es un indicio, no confirma '
+                'el estado ni quién mira. Usa ambas lecturas si pregunta por el salto. Humedad: la hora del '
+                'sensor indica cuándo se midió, no cuándo empezó a subir. La referencia es la mediana, '
+                'y su diferencia se expresa en puntos porcentuales. Ducha: estimación aproximada basada '
+                'en baño y humedad, sin saber si usó agua caliente ni cuánto duró.\n'
+                'Reloj: el fin de bedtime es el fin del modo, sin determinar cuándo se levantó ni cómo '
+                'se desactivó. Reposo: usa pasos y pulso, nunca la potencia ni la habitación. '
+                'Ejercicio: si tramo es null, no consta un tramo claro en el intervalo pedido. '
+                'Si pide ayuda con un objetivo explícito de actividad física o alimentación, ofrece una '
+                'idea sencilla y opcional con lo que contó.',
                 {'mensaje': question, 'conversacion': conversation, 't0': t0,
                  'metricas': metrics, 'contexto_actividad': response_context, 'eventos': events},
             )

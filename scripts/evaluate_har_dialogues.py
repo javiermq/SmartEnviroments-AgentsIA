@@ -3,6 +3,7 @@ import argparse
 from html import escape
 import json
 from pathlib import Path
+from time import perf_counter
 
 from smart_home_agent.config import Settings
 from smart_home_agent.historical_har import History
@@ -59,6 +60,19 @@ EVENT_SCENES = (
     )),
 )
 
+HEALTH_SCENES = (
+    ('Objetivo de actividad física', (
+        ('2026-11-01T14:08:00+01:00', 'Quiero moverme más, pero sin agobiarme. ¿Por dónde empiezo?'),
+        ('2026-11-01T14:08:00+01:00', '¿Cuántos minutos duró el ejercicio que acabo de hacer?'),
+        ('2026-11-01T14:08:00+01:00', '¿Y cuántos pasos y qué pulso medio tuve durante ese rato?'),
+    )),
+    ('Preferencia de alimentación', (
+        ('2026-10-31T20:52:00+01:00', 'Estoy preparando un bocadillo. Quiero comer más verduras. ¿Qué podría añadir?'),
+        ('2026-10-31T20:53:00+01:00', 'Solo tengo tomate y zanahoria. ¿Qué opción encaja?'),
+        ('2026-10-31T20:54:00+01:00', 'Al final todavía no he comido. ¿Sabes qué he cenado?'),
+    )),
+)
+
 
 class TracedDemo(LocalDemo):
     def ask(self, prompt, context, schema=None):
@@ -106,6 +120,11 @@ def write_report(output, report):
                          f'<small>({escape(turn["t0"][11:16])})</small></p>'
                          f'<p><b>Agente</b> · {escape(answer)}</p>'
                          f'<p>Métricas · {escape(metrics)} &nbsp; HAR · {escape(activity)}</p>')
+            review = turn.get('revision')
+            if review:
+                verdict = 'Coherente' if review['cumple'] else 'No cumple'
+                parts.append(f'<p><b>{verdict}</b> · {escape(review["criterio"])}'
+                             f'<br>{escape(review["motivo"])}</p>')
             for call in turn['llamadas']:
                 parts.append(f'<details><summary>{escape(call["agente"])} · ver consulta y respuesta</summary>'
                              f'<p><b>Consulta recibida</b></p><pre>{pretty(call["entrada"])}</pre>'
@@ -124,14 +143,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--model', default=settings.ollama_model)
-    parser.add_argument('--events', action='store_true', help='Replay the conversational event scenarios.')
+    suite = parser.add_mutually_exclusive_group()
+    suite.add_argument('--events', action='store_true', help='Replay the conversational event scenarios.')
+    suite.add_argument('--paper', action='store_true', help='Replay the 50-turn conference evaluation.')
     parser.add_argument('--resume', action='store_true', help='Reuse unchanged turns from an earlier run.')
     args = parser.parse_args()
     if args.output is None:
-        args.output = Path('temp_data/dialogos_har_eventos' if args.events else 'temp_data/dialogos_har_50')
+        name = 'access27_dialogues' if args.paper else 'dialogos_har_eventos' if args.events else 'dialogos_har_50'
+        args.output = Path('temp_data') / name
     demo = TracedDemo(History('dataset_home_real'), args.model, settings.ollama_url)
     report = {'modelo': demo.model, 'fuentes': demo.history.sources,
-              'evaluacion': 'eventos' if args.events else 'conversacion', 'escenas': []}
+              'evaluacion': 'access27' if args.paper else 'eventos' if args.events else 'conversacion', 'escenas': []}
     previous = {}
     if args.resume:
         saved = json.loads(args.output.with_suffix('.json').read_text(encoding='utf-8'))
@@ -143,6 +165,13 @@ def main():
         (title, tuple((t0, message) for message in (opening, *follow_ups)))
         for (title, t0, opening), follow_ups in zip(SCENES, FOLLOW_UPS)
     )
+    if args.paper:
+        scenes = tuple((title, turns[:3]) for title, turns in scenes) + (
+            EVENT_SCENES[0],
+            (EVENT_SCENES[1][0], tuple(EVENT_SCENES[1][1][i] for i in (0, 1, 3, 4))),
+            (EVENT_SCENES[2][0], EVENT_SCENES[2][1][1:]),
+            *HEALTH_SCENES,
+        )
     for index, (title, messages) in enumerate(scenes, 1):
         scene = {'id': index, 'titulo': title, 't0': messages[0][0], 'turnos': []}
         report['escenas'].append(scene)
@@ -160,8 +189,10 @@ def main():
             demo.calls = []
             turn = {'turno': number, 'mensaje': message, 't0': t0, 'llamadas': demo.calls}
             scene['turnos'].append(turn)
+            started = perf_counter()
             try:
                 result = demo.respond(message, t0, conversation[-4:], events)
+                turn['ms'] = round((perf_counter()-started)*1000)
                 turn['resultado'] = result
                 events = result['eventos']
                 conversation.extend([{'usuario': message}, {'agente': result['respuesta']}])
