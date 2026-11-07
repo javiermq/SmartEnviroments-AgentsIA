@@ -198,7 +198,7 @@ from .metrics_har_agent import MetricsHarAgent as HistoricalAgent, schemas
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--data', type=Path, default=Path('dataset_home_real/all_data_72hours.txt'))
+    parser.add_argument('--data', type=Path, default=Path('dataset_home_real'))
     parser.add_argument('--t0')
     parser.add_argument('--question-time', help='Timestamp del registro de la pregunta; referencia por defecto si se omite t0')
     parser.add_argument('--model')

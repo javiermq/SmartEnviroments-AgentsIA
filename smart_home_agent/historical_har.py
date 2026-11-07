@@ -28,12 +28,31 @@ SIGNALS = {
     'cocina_platos4': 'binary', 'entrada_binario7': 'binary',
     WATCH+'bedtime': 'binary', WATCH+'network_evidence': 'code',
 }
+MEDIAN_WINDOWS = {
+    'bano_humedad7_pct': (120, 'bano_humedad_2h', 'bano_humedad_delta_2h_pp'),
+    'salon_consumo14_w': (1440, 'tv_power_24h', 'tv_power_delta_24h_w'),
+}
+REFERENCE_EXPORT = 'all_data_72hours_reference.txt'
+
+
+def median_columns(column: str) -> dict[str, str]:
+    _, prefix, delta = MEDIAN_WINDOWS[column]
+    return {
+        'median': prefix+'_median',
+        'observed_values': prefix+'_observations',
+        'current_at': prefix+'_current_at',
+        'first_observed_at': prefix+'_first_at',
+        'median_minus_current': delta,
+    }
+
+
 SOURCE_COLUMNS = {
     'timestamp', 'timestamp_unix', 'fecha', 'minuto', 'watch_id', 'habitacion',
     'ancla_minima', 'distancia_minima_m', *SIGNALS,
     *(WATCH+k for k in ('battery_max_percent', 'charging_observed', 'ble_gateway',
                        'ble_rssi_dbm', 'store', 'source_minute', 'revision')),
 }
+SOURCE_COLUMNS.update(name for signal in MEDIAN_WINDOWS for name in median_columns(signal).values())
 WARNINGS = [
     'Vacío es desconocido; no se interpolan ni arrastran valores.',
     'Habitación UWB estimada; no es HAR validado ni identifica a la persona.',
@@ -80,7 +99,9 @@ class History:
             if self.directory.is_file():
                 return [self.directory]
             daily = sorted(self.directory.glob('????-??-??.tsv'))
-            consolidated = self.directory/'all_data_72hours.txt'
+            consolidated = self.directory/REFERENCE_EXPORT
+            if not consolidated.is_file():
+                consolidated = self.directory/'all_data_72hours.txt'
             if daily and consolidated.is_file():
                 raise ValueError('Hay export diario y consolidado: indica el archivo o directorio exacto')
             return daily or ([consolidated] if consolidated.is_file() else [])
@@ -285,29 +306,49 @@ class History:
         Humidity defaults to 2h and TV power to 24h. Available readings are used
         even with a partial history; no density gate, carry-forward or interpolation.
         """
-        defaults = {'bano_humedad7_pct': 120, 'salon_consumo14_w': 1440}
-        if column not in defaults:
+        if column not in MEDIAN_WINDOWS:
             raise ValueError('Referencia móvil disponible para humedad y potencia de la televisión.')
-        width = defaults[column] if window_minutes is None else window_minutes
+        default_width = MEDIAN_WINDOWS[column][0]
+        width = default_width if window_minutes is None else window_minutes
         if isinstance(width, bool) or not isinstance(width, int) or not 1 <= width <= 10080:
             raise ValueError('window_minutes debe ser entero entre 1 y 10080.')
         ref = stamp(t0) if t0 else self.latest
         a = ref-width*60
-        points = [(t, value) for t, row in sorted(self.rows.items()) if a <= t < ref
-                  and (value := number(row, column)) is not None]
-        baseline = median(value for _, value in points) if points else None
-        latest = points[-1] if points else None
+        stored = self.rows.get(ref-60, {})
+        fields = median_columns(column)
+        precalculated = width == default_width and set(fields.values()) <= stored.keys()
+        if precalculated:
+            baseline = number(stored, fields['median'])
+            count = int(stored[fields['observed_values']])
+            first_at = stored[fields['first_observed_at']] or None
+            current_at = stored[fields['current_at']] or None
+            difference = number(stored, fields['median_minus_current'])
+            latest = None
+            if current_at is not None:
+                current = stamp(current_at)
+                value = number(self.rows.get(current, {}), column)
+                if not a <= current < ref or value is None:
+                    raise ValueError('Lectura de referencia precalculada inválida.')
+                latest = current, value
+        else:
+            points = [(t, value) for t, row in sorted(self.rows.items()) if a <= t < ref
+                      and (value := number(row, column)) is not None]
+            count = len(points)
+            baseline = median(value for _, value in points) if points else None
+            latest = points[-1] if points else None
+            first_at = iso(points[0][0]) if points else None
+            difference = baseline-latest[1] if latest else None
         result = self.base(a, ref, ref)
         result.update(column=column, window_minutes=width,
                       formula='median_observed_window - current_value', includes_current_in_median=True,
-                      observed_values=len(points),
-                      available_export_minutes=sum(a <= t < ref for t in self.rows),
+                      observed_values=count,
+                      available_export_minutes=result['coverage']['rows'],
                       median=baseline, current_value=latest[1] if latest else None,
                       current_at=iso(latest[0]) if latest else None,
                       current_age_minutes=(ref-latest[0])/60 if latest else None,
-                      first_observed_at=iso(points[0][0]) if points else None,
-                      median_minus_current=baseline-latest[1] if latest else None,
-                      status='available' if points else 'no_observations')
+                      first_observed_at=first_at,
+                      median_minus_current=difference,
+                      status='available' if count else 'no_observations')
         result['units'].update(level=SIGNALS[column],
                                difference='percentage_points' if column == 'bano_humedad7_pct' else 'W')
         return result
