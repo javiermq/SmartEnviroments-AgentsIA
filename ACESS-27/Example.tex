@@ -30,137 +30,130 @@
 
 \keywords{Smart environments, Face recognition, Social robots, Human activity recognition, Edge--fog computing, Large language models, Context-aware interaction.}
 
-\abstract{Context-aware assistance in a shared home depends on recognising the interlocutor and distinguishing observations, inferences and user declarations. We present a four-layer sensor--HAR--language reference architecture with explicit contracts for evidence, temporal scope and reflexive validation. A household case study uses Reachy Mini for face recognition and three local language-model roles to resolve metrics, select context and compose replies. A four-resident trial reported 96\% target-user recognition over 50 attempts. In a 50-turn development replay across 15 scenarios, revised prompts and more selective evidence increased evidence-consistent replies from 34 to 41 and correct numerical answers from 7/8 to 8/8. In a separate 12-pair control, the model recovered every requested detail when supplied as an event. When the event was withheld, ten replies acknowledged the missing detail and two gave unsupported answers. The evaluation identifies remaining failures in source attribution and conversational continuity.}
+\abstract{In a shared home, a conversational assistant must relate a resident's request to the right person, time period and source of evidence. We propose a four-layer reference architecture that connects multimodal sensing and human activity recognition (HAR) to goal-aware dialogue. The layers exchange evidence with explicit provenance and temporal scope, distinguishing sensor observations, activity estimates and user statements. A household prototype uses Reachy Mini for camera-based session selection and draws on ultra-wideband localisation, wearable measurements and ambient sensors for activity context. A locally hosted language model serves three roles in sequence, selecting metric queries, assembling context and generating replies. In a four-person household, the face recognition trial yielded 48 correct outcomes in 50 attempts (96\%). We examined 50 scripted user turns against 72 hours of household sensor data and used a separate paired test to examine retrieval of details carried by contextual events. The case study illustrates how an assistant can use recent and historical evidence in the same exchange, and where it needs to verify the source or time period before answering.}
 
 \onecolumn \maketitle \normalsize \setcounter{footnote}{0} \vfill
 
 \section{\uppercase{Introduction}}
 \label{sec:introduction}
 
-Smart environments combine ambient sensors, wearables and computational services to analyse daily activities~\cite{cook2007smart}. Edge--fog architectures distribute processing near acquisition, with connectivity, latency and privacy influencing the deployment~\cite{shi2016edge}. Social robots add an embodied interface, while user acceptance remains important in assistive applications~\cite{broadbent2009acceptance}.
+A resident may ask a home assistant about exercise earlier that morning, correct its interpretation of a recent activity or request a suggestion that fits a stated preference. Each request depends on evidence that the home may only partially observe. Ambient devices and wearables offer complementary views of daily life~\cite{cook2007smart}, and Hong, Nugent and colleagues showed how to combine observations of uncertain reliability when inferring activities~\cite{hong2009evidential}. Edge--fog computing enables devices and nearby servers to share the work of collecting and interpreting these observations~\cite{shi2016edge}. A social robot provides an embodied interface through which residents can use the resulting services~\cite{broadbent2009acceptance}.
 
-Human activity recognition (HAR) connects measurements to interpretable descriptions through acquisition, segmentation and classification~\cite{bulling2014tutorial}. Data-driven methods learn patterns from multimodal streams~\cite{ordonez2016deep}. Knowledge-driven approaches use rules, ontologies or other explicit relationships~\cite{polo2025health}. In shared homes, UWB localisation and proximity can help relate events to users~\cite{poloMultiOccupancy,polo2024social}. Identity at the robot, wearable identity and room location nevertheless refer to different observations.
+Human activity recognition (HAR) relates patterns in sensor data to descriptions of behaviour~\cite{bulling2014tutorial}. Data-driven methods learn these patterns from examples~\cite{ordonez2016deep}, while knowledge-driven methods encode relationships among observations, context and activities~\cite{polo2025health}. In a shared home, activity recognition and attribution pose separate questions. A contact sensor may indicate that a cupboard opened, while localisation and proximity can provide evidence about which occupant was involved~\cite{poloMultiOccupancy,polo2024social}. The assistant must preserve this distinction when it describes the event.
 
-Connecting this context to a large language model (LLM) raises two questions. How can the robot identify its interlocutor while preserving the provenance of the other modalities? How can a dialogue retain that provenance when the person asks about an earlier activity or corrects a sensor interpretation? A reply can contain an accurate reading yet overstate what it establishes. In this work, goal awareness means using a preference that the person states, such as moving more or adding vegetables, to orient an optional suggestion in the current conversation.
+Large language models (LLMs) can interpret conversational references and formulate responses using environmental context. Recent systems use sensory evidence to decide whether assistance is warranted, select tools or adapt how a suggestion is presented~\cite{yin2025harmony,yang2025contextagent,yang2026proagent,lee2025sensible}. In a household dialogue, the model may need to bring together evidence from different periods and resolve a reference to a particular resident, activity or device. A correction also changes what the assistant should say, even when the underlying sensor record stays the same. We use \emph{goal-aware dialogue} to mean that a goal stated by the user, such as becoming more active, can guide a relevant and optional suggestion.
 
-We contribute a four-layer sensor--HAR--language architecture with a distinct visual session-selection path, a local prototype that exchanges time-bounded metrics and source-tagged events across three prompted roles, and a household feasibility assessment that reports facial recognition, response consistency and event recovery separately.
+Our contribution is a four-layer reference architecture that links sensing and HAR to dialogue through interfaces for identity, time-scoped queries and contextual events. A local prototype uses face recognition to select a session and assigns metric resolution, context selection and reply generation to separate roles. The case study examines target-user recognition, evidence use in scripted dialogue and the contribution of structured events to detail retrieval.
+
+Section~\ref{sec:related} reviews prior work. Section~\ref{sec:methodology} describes the architecture and deployment, and Section~\ref{sec:case-study} presents the household case study. Section~\ref{sec:evaluation} reports the evaluation, followed by discussion and conclusions in Section~\ref{sec:discussion}.
 
 \section{\uppercase{Related Work}}
 \label{sec:related}
 
-We compare representative designs by how they acquire context, how they expose it to an application, and what they evaluate. The comparison concerns architectural choices rather than a common performance benchmark.
+Three lines of work inform the proposed architecture. Smart-home middleware provides access to heterogeneous devices, sensing and robotics connect those devices to activities and people, and LLM agents use the resulting context to decide what assistance to offer.
 
 \subsection{Smart-Home Middleware, Sensing and Robotics}
 
-The Context Toolkit separates acquisition and representation from application use~\cite{dey2001toolkit}. The Gator Tech Smart House and HomeOS shield applications from heterogeneous devices through service and platform abstractions~\cite{helal2005gator,dixon2012homeos}. The universAAL extension by Zmuda et al.~\cite{zmuda2016universaal} adds explicit semantics to assistive services. Our architecture shares the separation of device integration and application logic. The prototype uses Home Assistant, MQTT and a small typed query interface. This keeps the dialogue independent of device protocols, while dynamic discovery and a reusable semantic service platform remain outside the evaluation.
+The Context Toolkit separated the acquisition and representation of context from its use by applications~\cite{dey2001toolkit}. The Gator Tech Smart House and HomeOS applied this principle to residential settings through abstractions for devices and services~\cite{helal2005gator,dixon2012homeos}. Work on universAAL added explicit semantics for assistive services~\cite{zmuda2016universaal}. These systems established mechanisms for sharing context across applications.
 
-CASAS illustrates how timestamped residential events support longitudinal sensing and activity analysis~\cite{cook2013casas}. SPHERE similarly brings environmental, wearable and video observations together in a residential infrastructure~\cite{elsts2018sphere}. Our sensor archive serves a similar role, but the Reachy Mini camera is used to select the interlocutor's session. Activity hypotheses come from wearable and ambient observations. The resulting evaluation distinguishes a visual assignment error from an episode or dialogue error.
-
-Robot-Era connects assistive robots to ambient intelligence and evaluates service acceptability with older adults~\cite{cavallo2018robotera}. CloudIA studies personalised robot-mediated activities in nursing facilities~\cite{sorrentino2023cloudia}. Both show the value of evaluating embodiment and interaction with users. Our study reports household face recognition and text grounding as separate feasibility tests, leaving acceptance and integrated spoken interaction for a prospective evaluation.
-
-Learned face aggregation can combine several frames into a template and adapt their weights to image quality~\cite{yang2017nan}. The Reachy Mini pipeline also uses multiple frames, with explicit crop ranking, per-frame distances and a median-and-agreement rule. This choice leaves an inspectable explanation for a rejected batch. Learned aggregation is a separate candidate for comparison on held-out camera trials.
+CASAS used timestamped residential events to study activities over time~\cite{cook2013casas}, while SPHERE brought environmental, wearable and video measurements into a common sensing infrastructure~\cite{elsts2018sphere}. Social robots provide a way to act on this context in direct exchanges with occupants. Robot-Era evaluated the acceptance of assistive robot services~\cite{cavallo2018robotera}, and CloudIA examined engagement with personalised robot-mediated activities~\cite{sorrentino2023cloudia}. Reachy Mini provides a camera and audio interface within a single platform~\cite{danieau2026reachymedia}. For visual identification, work on video face recognition shows how a system can aggregate evidence across frames while assigning greater weight to informative views~\cite{yang2017nan}.
 
 \subsection{LLM Agent Architectures for Smart Environments}
 \label{subsec:related-llm}
 
-Polo-Rodr{\'i}guez et al.~\cite{polo2025chatbots} provide a direct antecedent by connecting UWB, ambient sensing and HAR to a chatbot. We retain this sensing-to-language path and add a visual session interface, a turn-specific cutoff and source-tagged declarations. He and Jazizadeh~\cite{he2025bems} also route historical queries through tools. Their agent supports broader analyses through generated code, while our fixed catalogue makes each operation and its temporal scope inspectable.
+Language models can contribute to activity recognition or use the results of an independent recogniser. SensorLLM aligns motion signals with language for activity recognition~\cite{li2025sensorllm}. Polo-Rodr\'iguez et al.~\cite{polo2025chatbots} use indoor localisation, ambient sensing and HAR to supply activity and location context to a chatbot. The latter approach lets dialogue use information produced by services with their own observation windows and methods.
 
-\paragraph{Harmony.}
-Harmony separates event interpretation, decision-making and device control around a local language model~\cite{yin2025harmony}. It combines virtual device tasks, an 18-participant questionnaire and an exploratory five-participant interaction study. Its feasibility checks are a precedent for reflexive validation. We apply a similar separation to historical queries and evidence selection. The open question in our setting is whether the reply preserves the source, person and time attached to a measurement or estimate.
+Harmony is a close architectural precedent. It separates event interpretation, decision-making and appliance control around a local model, with evaluation in a virtual environment and an exploratory user study~\cite{yin2025harmony}. ContextAgent draws on egocentric sensing and user information to decide when assistance is warranted and which tools to invoke. Its benchmark includes a subset of cases with raw sensory inputs~\cite{yang2025contextagent}. ProAgent addresses the overhead of continuous egocentric sensing by using inexpensive cues to trigger richer perception. Its evaluation uses everyday recordings and participant feedback on the resulting assistance~\cite{yang2026proagent}. Sensible Agent adapts the content and modality of augmented-reality suggestions and lets users confirm or modify them. Its controlled laboratory study used experimenter-triggered assistance to examine how the interaction was received~\cite{lee2025sensible}.
 
-\paragraph{ContextAgent.}
-ContextAgent combines egocentric video and audio with persona context to decide when assistance is warranted and which tools to call~\cite{yang2025contextagent}. Its evaluation uses constructed scenarios and a subset paired with verified raw sensory inputs. Separating context extraction from the decision to intervene is relevant to our design. Its metrics concern proactive decisions and tool calls. Our replay measures how well a reply uses an available measurement, activity estimate or declaration.
+Goals and tool use add another dimension to this comparison. Sasha translates high-level goals into actions on home devices~\cite{king2024sasha}, while SayCan and ReAct illustrate how language-based decisions can incorporate available capabilities or observed tool outputs~\cite{ahn2022saycan,yao2023react}. In assistive dialogue, a resident's stated goal can also guide the content of a suggestion. Its relevance in a given turn and its effects on behaviour over time are distinct outcomes. Longitudinal studies of coaching and adaptive interventions provide methods for investigating the latter~\cite{bickmore2013interventions,nahumshani2018jitai}.
 
-\paragraph{ProAgent.}
-ProAgent adds tiered perception that uses low-cost cues to request richer sensing when needed~\cite{yang2026proagent}. The prototype provides evidence about wearable operation and timing, including participant-annotated intervention windows and ratings of responses generated from their recordings. Its sensing policy suggests an extension for our infrastructure layer. Our reference time bounds a query about recorded evidence, while ProAgent's time windows evaluate when an intervention is appropriate.
+Egocentric systems follow the wearer across settings, while home infrastructure can retain a history of shared spaces and devices. Our architecture draws primarily on that household history and combines it with wearable measurements, visual session selection and information supplied by the resident. This design foregrounds the provenance of evidence that may refer to different people or periods. The studies above provide evidence at different levels, including benchmark decisions, responses to real-world recordings and controlled interaction. Sustained field studies can reveal how these capabilities work together in daily routines~\cite{brown2011wild}. Our case study addresses separate components of that broader evaluation.
 
-\paragraph{Sensible Agent.}
-Sensible Agent adapts the content and modality of AR suggestions and lets users confirm or modify them~\cite{lee2025sensible}. Its preliminary study compares that interaction with voice-initiated assistance. Experimenter-triggered behaviour isolates the interaction design under staged conditions. It leaves autonomous triggering to further validation. The user confirmation step is relevant to our dialogue layer when an estimate or proposed action needs clarification.
-
-\begin{table*}[t]
-\centering
-\caption{Evaluation scope of four LLM architectures for context-aware assistance.}
-\label{tab:related}
-\small
-\begin{tabularx}{\textwidth}{@{}p{0.18\textwidth}YYY@{}}
-\hline
-\textbf{Study} & \textbf{Architectural contribution} & \textbf{Evidence reported} & \textbf{Open question for residential dialogue} \\
-\hline
-Harmony & Local modular reasoning with device feasibility checks & Virtual tasks, questionnaire and exploratory user interaction & Does a reply preserve the provenance and time of historical evidence? \\
-ContextAgent & Sensory and persona context for proactive decisions and tools & 1,000 benchmark samples, with a 300-sample sensory version & Do benchmark trigger decisions transfer to sustained use in shared homes? \\
-ProAgent & Tiered on-demand sensing and timed assistance & 92 h of recordings across 20 participants and ratings by those participants & How should personal sensing be combined with shared household records? \\
-Sensible Agent & Context-sensitive AR suggestions and confirmation & Ten participants, 12 staged scenarios and experimenter-triggered behaviour & Can autonomous triggering preserve the observed interaction benefits? \\
-\hline
-\end{tabularx}
-\end{table*}
-
-These evaluations substantiate different parts of the architectures. Benchmark scores, recorded field data and controlled interaction studies provide complementary evidence. Proposed capabilities beyond the conditions tested remain hypotheses. In shared homes, sustained autonomous operation requires evaluating sensing, identity and interaction together over time. The present study also has that limit. It evaluates visual recognition and evidence-grounded dialogue separately and treats proactive timing as an open question.
-
-Sasha maps high-level goals to relevant device actions and feedback~\cite{king2024sasha}. Our goal-aware scope concerns suggestions grounded in what the user states. Research on conversational coaching and just-in-time interventions provides examples of designs for assessing longer-term physical activity or dietary outcomes~\cite{bickmore2013interventions,nahumshani2018jitai}. SayCan and ReAct motivate validating language-driven choices against available capabilities or observations~\cite{ahn2022saycan,yao2023react}. Here that validation applies to metric requests and episode identifiers.
-
-SensorLLM addresses an earlier boundary in the processing chain by aligning motion-sensor time series with language for activity recognition~\cite{li2025sensorllm}. That design can learn representations directly from sensor sequences. Our case study exposes the output of a rule-based HAR service to the model. This keeps the evidence for a candidate inspectable and makes the dialogue interface independent of the HAR algorithm. It also limits the activity vocabulary to the operational predicates available in the engine.
-
-
-\section{\uppercase{Methodology}}
+\section{\uppercase{Methodology and Materials}}
 \label{sec:methodology}
+
+We first specify the responsibilities of the layers and the interfaces through which they exchange evidence and requests. We then describe the devices and computing infrastructure used to instantiate the architecture in a home.
 
 \subsection{Reference Architecture}
 \label{subsec:general-architecture}
 
-We define a reference architecture for an intelligent environment that observes a shared space and interacts with its occupants. It separates acquisition, context interpretation and assistance. Figure~\ref{fig:reference} shows the four layers and the direction of their exchanges.
+The four layers are \emph{Sensing and Actuation}, \emph{Edge--Fog Infrastructure}, \emph{Pattern and Action Services}, and \emph{Intelligent Care}. Observations flow upwards to services that interpret them. Queries and proposed actions travel downwards to the appropriate service or device (Figure~\ref{fig:reference}).
 
 \begin{figure}[t]
 \centering
 \small
 \setlength{\fboxsep}{4pt}
 \begin{tabular}{@{}c@{}}
-\fbox{\parbox{0.89\columnwidth}{\textbf{Intelligent Care}\\User context, dialogue, goals and feedback}} \\
+\textbf{User} \\
+{\footnotesize User input \(\downarrow\quad\uparrow\) Replies and suggestions} \\
+\fbox{\parbox{0.89\columnwidth}{\textbf{Intelligent Care}\\Context selection, validation and dialogue}} \\
 {\footnotesize Evidence \(\uparrow\quad\downarrow\) Queries and requests} \\
-\fbox{\parbox{0.89\columnwidth}{\textbf{Pattern and Action Services}\\Metrics, identity, activity and action services}} \\
+\fbox{\parbox{0.89\columnwidth}{\textbf{Pattern and Action Services}\\Metrics, identity, localisation and activity}} \\
 {\footnotesize Observations \(\uparrow\quad\downarrow\) Service requests} \\
-\fbox{\parbox{0.89\columnwidth}{\textbf{Edge--Fog Infrastructure}\\Communication, history and computation}} \\
+\fbox{\parbox{0.89\columnwidth}{\textbf{Edge--Fog Infrastructure}\\Messaging, history and distributed processing}} \\
 {\footnotesize Device data \(\uparrow\quad\downarrow\) Device commands} \\
-\fbox{\parbox{0.89\columnwidth}{\textbf{Sensing and Actuation}\\Device acquisition and interaction}} \\
+\fbox{\parbox{0.89\columnwidth}{\textbf{Sensing and Actuation}\\Ambient and wearable sensors, camera and robot}} \\
 \end{tabular}
-\caption{Reference architecture. Each layer exposes interfaces to the adjacent layers.}
+\caption{Reference architecture and exchanges between layers. Device types illustrate one possible deployment.}
 \label{fig:reference}
 \end{figure}
 
 \paragraph{Sensing and Actuation.}
-Sensors capture changes in the environment and signals related to occupants. Interaction devices acquire user input and deliver output. Each observation is associated with a source, a temporal reference and an entity or region when available. The device interface defines which actions it can execute and report back.
+This layer acquires observations from the physical environment and delivers outputs to it. Contact sensors can report discrete events, while wearable, ambient and audiovisual devices can supply streams at different rates. Each observation carries a source and timestamp, together with a subject or location when available. Actuators can report the outcome of a command, allowing subsequent observations to inform the next decision.
 
 \paragraph{Edge--Fog Infrastructure.}
-This layer connects devices and services. It manages message delivery, access to historical observations and placement of computation. Processing can be distributed near acquisition or across a local service infrastructure according to latency, resources and governance. The interfaces to the other layers are independent of that placement.
+This layer distributes observations, provides access to historical records and allocates processing across devices and nearby servers. Publish--subscribe middleware decouples producers from consumers, as illustrated by MQTT-based fog systems and event distribution in ZeroC Ice deployments~\cite{oasis2019mqtt,zerocIcestorm}. Latency-sensitive filtering can run near acquisition, while aggregation or more demanding inference can run on shared infrastructure. Services use the same observation and query interfaces across these placements.
 
 \paragraph{Pattern and Action Services.}
-Pattern services derive quantities and contextual hypotheses from observations. Identity, localisation and activity recognition are separate services because they answer different questions. A knowledge-driven service may apply rules. A data-driven service may learn patterns. Both return evidence with the same scope and source information. Action services validate a request against the capabilities and permissions of the deployment before execution.
+Pattern services derive quantities and estimates for specific tasks, including identity, localisation and activity recognition. Learned models can capture complex multimodal patterns, although supervised approaches depend on representative labelled data~\cite{ordonez2016deep}. Knowledge-driven rules can incorporate expert judgement and expose the basis of an estimate, but require adaptation to the setting. Fuzzy rules can represent graded support, as in the association of ambient events with nearby occupants~\cite{poloMultiOccupancy}. These approaches share an interface for reporting an estimate, its scope and its supporting evidence. Metric computation is exposed separately so that language generation can use an inspectable result. Action services check feasibility and permissions before execution.
 
 \paragraph{Intelligent Care.}
-The interaction layer uses evidence and user input to answer a question, explain an estimate or propose an action. A goal or preference can guide the response when relevant. Feedback from a user can revise the conversational interpretation. If an action is executed, its outcome can enter the sensing path as a new observation.
+This layer determines which evidence is relevant to a request, how it relates to the recent dialogue and whether a stated goal should inform the response. A resident can correct an estimate or express a preference about how assistance is offered. Where appropriate, a caregiver or domain expert can help specify meaningful patterns and conditions that warrant human judgement. Recent observations support immediate exchanges, while longer records can inform follow-up questions about recurring activities or longer-term goals.
 
-\subsection{Evidence and Temporal Scope}
+\subsubsection{Evidence and Temporal Scope}
 \label{subsec:evidence-method}
 
-An evidence item is represented as \(e=(k,s,u,T,x)\), where \(k\) is the kind of evidence, \(s\) its source, \(u\) the subject or region, \(T\) a time point or interval, and \(x\) the payload. We distinguish an \emph{observation} from an \emph{inference} and a \emph{user declaration}. An observation reports a reading or state. An inference carries a hypothesis and may include supporting observations or uncertainty. A declaration records what was communicated and when. If it describes an earlier period, the described interval is distinct from the time of the utterance.
+Each evidence item carries a type, a source, a time point or interval and, where available, a subject or region. An \emph{observation} reports a measured value or recorded state. An \emph{inference} interprets one or more observations and can carry its supporting evidence. A \emph{user declaration} records what the person said and when, with a separate time reference when the statement concerns another period. A session identity associates the current exchange with a profile. Assigning a historical observation from a shared device to that profile requires separate evidence.
 
-An identity decision associates an interaction with a profile or returns unknown. This association has a scope, such as the current session. Linking another source to that profile requires an association of its own. A shared observation can remain unassigned even when the interaction identity is known.
+A historical query specifies a target, an operation and an interval anchored to the time of the current turn. The dialogue history helps resolve expressions such as \emph{then} or \emph{that morning}. The metric service returns the interval actually used, the result and any limits on coverage. A reply can therefore distinguish a sparse record from a well-observed interval and can report uncertainty if the subject or time period remains unresolved.
 
-A historical query is described by a target \(u\), an operation \(o\), an interval \(I\) and a reference time \(t_r\). For a query about the past, \(I=[a,b)\) with \(a<b\leq t_r\). The response carries the result, the interval used and the evidence or coverage that qualifies it. A service may return partial evidence or an explicit unknown result. In a live system, the time at which an item became available can also constrain the query. An interval of supporting evidence and the duration of the phenomenon it suggests are distinct quantities.
+\subsection{Deployment in a Multimodal Smart Home}
 
-\subsection{Context Exchange and Extensibility}
+The household prototype combines room estimates and timestamped sensor readings to identify candidate activities. A camera-equipped robot provides the interaction interface and can select the session associated with a recognised resident. Figure~\ref{fig:architecture} shows how the visual and activity paths converge at the dialogue coordinator.
+
+\subsubsection{Sensors and Interaction Devices}
+\label{subsec:setup}
+
+Figure~\ref{fig:devices} is reserved for a photograph of the devices used in the deployment.
+
+\begin{itemize}
+\item \textbf{Reachy Mini robot.} Its camera supplies face images for session selection, and its microphone and speaker provide the interface for spoken interaction.
+\item \textbf{Google Pixel Watch.} The watch records steps, heart rate and its bedtime-mode flag.
+\item \textbf{Indoor localisation.} Qorvo ultra-wideband (UWB) boards provide measurements used to estimate the resident's room.
+\item \textbf{Ambient devices.} Aqara Zigbee sensors and other Home Assistant channels record events involving kitchen objects and measurements such as bathroom humidity and television power.
+\end{itemize}
+
+\begin{figure}[t]
+\centering
+\IfFileExists{deployment-devices.pdf}{%
+    \includegraphics[width=\columnwidth]{deployment-devices.pdf}%
+}{%
+    \fbox{\rule{0pt}{20mm}\rule{0.88\columnwidth}{0pt}}%
+}
+\caption{Sensing and interaction devices used in the household deployment.}
+\label{fig:devices}
+\end{figure}
+
+\subsubsection{Edge Nodes, Fog Server and Middleware}
+
+Raspberry Pi edge nodes connect to the UWB boards and publish localisation data over MQTT. Home Assistant integrates the ambient channels, and a local broker distributes events to the services that consume them. This arrangement follows the division of sensing and local processing used in MQTT-based fog deployments~\cite{oasis2019mqtt}. A central computer serves as the fog node and runs the Qwen model.
+
+\subsubsection{Context Exchange and Validation}
 \label{subsec:agent-methods}
 
-The dialogue process uses three functional roles. \emph{Metric resolution} binds a request to an operation and temporal scope and obtains the result from a service. \emph{Semantic context} selects relevant hypotheses, user declarations and events and preserves their sources. \emph{Assistive dialogue} combines this context with the current user turn and applicable preferences. A deployment can combine roles in one component or implement them independently.
+The dialogue coordinator assigns three roles. Metric resolution selects a supported operation and obtains a result for the requested period. Context selection identifies relevant activity estimates, environmental events and user statements. Reply generation combines those inputs with the latest turn and any applicable preference. When a resident corrects an estimate, the declaration can guide subsequent replies while the original observation remains available for inspection.
 
-An event can become available between turns. The interaction layer may use it in a later response if it is relevant to the request. If the user corrects an inference, the correction can guide the conversation while the original observation remains in the history. Freshness and relevance are deployment policies. A record that is too old to describe the current state may still answer a question about the past.
-
-\paragraph{Reflexive validation.}
-Reliable interaction requires a way to check an interpretation before it is used in a reply or action. Given a request, selected evidence and a proposed result, a validation step can accept the result, request a revision or return unknown. For example, a check can verify that an answer refers to the requested interval and that a proposed command is supported by the environment. If a source or an association is missing, the system can ask for clarification or state what remains unknown. Harmony provides a precedent for combining context-grounded reasoning with feasibility checks before device execution~\cite{yin2025harmony}.
-
-An extension can replace a modality, a pattern service or the interaction interface by preserving its contract. For instance, an activity classifier can replace a rule engine if it exposes the hypothesis, its temporal scope and supporting evidence. A different identity service can select the interaction profile without changing the activity interface. The receiving component can therefore use the evidence type and scope without depending on the algorithm that produced it.
-
-\section{\uppercase{Case Study}}
-\label{sec:case-study}
+The reference architecture treats reflexive validation as a design requirement. Before a proposed interpretation guides a reply or action, the system needs a way to check its evidential basis and temporal scope. It can then revise the interpretation, ask for clarification or report insufficient evidence. For device actions, Harmony illustrates how feasibility can be checked before execution~\cite{yin2025harmony}. In our prototype, validation checks the structured operation and evidence selections. The dialogue evaluation examines the text produced from those inputs.
 
 \begin{figure*}[t]
     \centering
@@ -169,14 +162,28 @@ An extension can replace a modality, a pattern service or the interaction interf
     \label{fig:architecture}
 \end{figure*}
 
-\subsection{Sensor Setup and Record}
-\label{subsec:setup}
 
-Reachy Mini provides the camera, microphone and speaker. A Google Pixel Watch supplies steps, heart rate and its bedtime-mode flag. Home Assistant and MQTT integrate the observations locally~\cite{oasis2019mqtt}. Quorvo UWB boards provide room estimates, while Aqara Zigbee and other Home Assistant channels record changes such as kitchen object use, humidity and electrical power. The fixed replay export contains 4,320 minute bins from 31 October 2026 at 12:06 to 3 November 2026 at 12:06, Europe/Madrid time, with an exclusive endpoint. Individual channels have different coverage (Table~\ref{tab:coverage}).
+\section{\uppercase{Case Study}}
+\label{sec:case-study}
+
+The deployment took place in a four-person household. The target resident was a 43-year-old woman who lived with her spouse and two children. She was the subject of the face recognition trial and the source of the wearable measurements. Figure~\ref{fig:floor-plan} is reserved for the layout of the monitored home.
+
+The sensor archive spans 72 hours, from 31 October 2026 at 12:06 to 3 November 2026 at 12:06 in the Europe/Madrid time zone. The final timestamp is excluded, yielding 4,320 one-minute bins. Table~\ref{tab:coverage} reports the number of bins with a recorded value for each channel. Coverage describes the availability of measurements, which varies with the reporting behaviour of each device.
+
+\begin{figure}[t]
+\centering
+\IfFileExists{household-floor-plan.pdf}{%
+    \includegraphics[width=\columnwidth]{household-floor-plan.pdf}%
+}{%
+    \fbox{\rule{0pt}{20mm}\rule{0.88\columnwidth}{0pt}}%
+}
+\caption{Layout of the monitored home.}
+\label{fig:floor-plan}
+\end{figure}
 
 \begin{table}[t]
 \centering
-\caption{Recorded values per channel in the 4,320-minute replay.}
+\caption{Recorded values per channel over the three-day household observation period.}
 \label{tab:coverage}
 \small
 \begin{tabular}{@{}lrr@{}}
@@ -194,14 +201,14 @@ Entrance sensor & 81 & 1.9\% \\
 \end{tabular}
 \end{table}
 
-The preprocessed humidity and power features subtract the observed value from the median in a trailing window of two and 24 hours, respectively. They use the available portion of the window at the beginning of the record. A shower hypothesis separately compares a humidity observation to a known pre-bathroom reading and allows up to ten minutes after the last bathroom observation. A power event requires a rise of at least 20 W and a crossing to at least 20 W above the trailing median between observations no more than five minutes apart.
+For bathroom humidity and television power, preprocessing stores the trailing median minus the current reading. The windows are two and 24 hours, respectively, and use the available observations, including the current reading. A television power event requires two readings at most five minutes apart, a rise of at least 20~W and a crossing from below to at least 20~W above the rolling median. The shower rule uses a separate comparison with the most recent humidity reading in the hour preceding the observed bathroom episode. It can use a humidity reading recorded up to ten minutes after the last bathroom observation.
 
 \subsection{Historical Queries and Activity Rules}
 \label{subsec:case-rules}
 
-The Python engine indexes the fixed export by minute. For an interval with \(N\) expected bins and observed sets \(O_s\) and \(O_h\), the step total is \(\sum_{t\in O_s}s_t\), mean pulse is \(\sum_{t\in O_h}h_t/|O_h|\) when available, and pulse coverage is \(|O_h|/N\). A recorded zero is a measurement. Missing values remain unknown. Relative queries use the local calendar. The cutoff limits observation time in the fixed archive.
+The metric engine indexes the archive by minute and resolves relative requests against the local calendar. A query uses observations before its reference time \(t_0\). For an interval with \(N\) expected bins, let \(O_s\) and \(O_h\) denote the sets of minutes with recorded steps and heart rate. The engine computes the observed step total as \(\sum_{t\in O_s}s_t\) and, when \(O_h\) is non-empty, the mean heart rate as \(\sum_{t\in O_h}h_t/|O_h|\). It reports heart-rate coverage as \(|O_h|/N\). A recorded zero contributes a measurement, while a missing bin contributes no observation.
 
-Table~\ref{tab:rules} lists the operational rules. The engine can bridge gaps of up to five minutes for most rules and retains the gap bins. It divides matching minutes by the duration of the candidate interval. The default threshold of 0.8 distinguishes supported episodes from weaker candidates. A candidate cut off by the query may represent only part of an activity.
+Table~\ref{tab:rules} lists the rules used to generate activity candidates. For most rules, matching minutes separated by up to five minutes can be grouped, with intervening bins retained as interruptions or missing evidence. Support is the fraction of the resulting interval in which the rule holds. The default threshold of 0.8 distinguishes supported episodes from weaker candidates. An interval that reaches a query boundary may describe only part of an episode.
 
 \begin{table*}[t]
 \centering
@@ -212,12 +219,12 @@ Table~\ref{tab:rules} lists the operational rules. The engine can bridge gaps of
 \hline
 \textbf{Rule} & \textbf{Evidence} & \textbf{Interpretation} \\
 \hline
-Exercise & At least 60 steps/min and 100 beats/min, with a candidate of at least five minutes & Compatible with ambulatory exercise. Summarise the observed interval. \\
-Rest & Zero observed steps and at most 65 beats/min, over a candidate of at least ten minutes & Rest hypothesis with reported coverage. \\
-Bathroom or shower & Bathroom room estimate. A shower candidate also requires an 8-point humidity rise over a known reference within the allowed delay. & Approximate shower hypothesis. Exact cause and duration remain unresolved. \\
-Kitchen use & Kitchen room estimate plus fridge light of at least 10 lux or a glass or plate sensor event in the same minute & Kitchen-use cue, with a self-report preferred when describing what the user was doing. \\
-Watch bedtime & Operating-system mode flag & Observed start, end or duration of the mode. \\
-Entrance & Entrance-area sensor event & Direction and time away are unresolved. \\
+Exercise & At least 60 steps/min and at least 100 beats/min in matching minutes, with a minimum candidate window of five minutes & Candidate interval compatible with ambulatory exercise. \\
+Rest & Zero recorded steps and at most 65 beats/min in matching minutes, with a minimum candidate window of ten minutes & Rest estimate with reported temporal support. \\
+Bathroom or shower & Bathroom room estimate. A shower candidate also requires a humidity rise of at least eight percentage points above the pre-episode reference. & Approximate shower timing based on the bathroom and humidity observations. \\
+Kitchen use & Kitchen room estimate and a fridge light reading of at least 10 lux or a glass or plate sensor event in the same minute & Evidence of kitchen use. A user statement can clarify the activity. \\
+Watch bedtime & Operating-system mode flag & Recorded start, end or duration of the mode. \\
+Entrance & Entrance-area sensor event & Evidence of activity at the entrance, with direction and time away unresolved. \\
 \hline
 \end{tabularx}
 \end{table*}
@@ -225,84 +232,44 @@ Entrance & Entrance-area sensor event & Direction and time away are unresolved. 
 \subsection{Reachy Mini Camera and Face Recognition}
 \label{subsec:face}
 
-The Reachy Mini client uses OpenCV and YuNet~\cite{wu2023yunet} to acquire a single complete face. Default acquisition requires a box of at least 120 pixels per side and an intersection over union of at least 0.65 with the first box. The client collects five distinct frames over at least one second. It ranks the face crops by sharpness, exposure and saturation, then sends the best three as JPEG crops to a local vision service.
+The Reachy Mini client uses OpenCV and YuNet~\cite{wu2023yunet} to detect a single complete face. The default acquisition procedure requires a bounding box of at least 120 pixels per side and an intersection over union of at least 0.65 with the first box. The client collects five distinct frames during a stable acquisition lasting at least one second. It ranks the face crops by a score combining sharpness, exposure and the fraction of clipped pixels, then sends the three highest-ranked crops to a local vision service.
 
-The server aligns each face and obtains 512-dimensional FaceNet embeddings through DeepFace~\cite{schroff2015facenet,serengil2020lightface}. For frame \(i\) and enrolled profile \(u\), it computes the minimum cosine distance from the crop embedding to the reference gallery \(G_u\). A profile requires valid comparisons in at least two frames and is ranked by its median distance. Acceptance requires a best distance of at most 0.50, a margin of at least 0.05 to the next profile if available, and two individual frame matches. Insufficient or ambiguous evidence yields an unknown result. The visual decision can select a dialogue session, and the service supports bounded diagnostic capture storage. The reported evaluation uses aggregate outcomes without including face images or embeddings.
+The service aligns each face and obtains a 512-dimensional FaceNet embedding through DeepFace~\cite{schroff2015facenet,serengil2020lightface}. For each frame and enrolled profile, it takes the smallest cosine distance between the crop embedding and the profile's reference embeddings. It ranks profiles by their median distance across at least two valid frames. Acceptance requires a median distance of at most 0.50, a margin of at least 0.05 to the next candidate when one exists, and agreement from at least two individual frame decisions. The service returns an unknown identity when these conditions are unmet.
 
-The frame and batch decisions address different sources of error. Geometric stability controls acquisition, while the distance margin rejects similar profile matches. The median and two-frame agreement limit the influence of one inconsistent crop. The single-face acquisition condition also means that recognition can wait while several people share the camera view. The household trial does not report the frequency of these events, and the thresholds are configuration defaults rather than estimates fitted from the 50 attempts.
+Acquisition stability limits variation between frames. The distance threshold and margin address weak or ambiguous matches, and the frame agreement requirement reduces the influence of a single crop. When multiple faces are visible, the single-face requirement can delay a decision. The household trial reports aggregate outcomes using these configuration defaults.
 
 \subsection{Local Agent Integration}
 \label{subsec:case-agents}
 
-The replay runs Qwen3-4B-Instruct-2507 in Q4\_K\_M quantisation through Ollama~\cite{qwen2025instruct}. The coordinator uses three sequential calls per turn. The robot integration can select a resident session by face recognition. In the text replay the sensor identity is fixed and the scripts supply Spanish utterances at explicit times.
+The prototype runs Qwen3-4B-Instruct-2507 in Q4\_K\_M quantisation through Ollama~\cite{qwen2025instruct}. The text evaluation fixes the resident profile and supplies an explicit reference time with each Spanish user turn. The coordinator makes three sequential model calls. The first selects a supported operation from the current turn and recent dialogue, and the metric engine computes the result. The second selects a candidate activity episode or abstains. It can also extract a statement directly from the user turn. The third generates a reply from selected evidence and recent dialogue.
 
-The Python coordinator validates the structured fields returned by the first two roles. Metrics selects an available operation from the user turn, reference time and recent dialogue. HAR Context selects an episode or abstains, and can extract a literal self-report. Conversation receives the selected evidence and a short transcript. Its instructions distinguish sensor readings, activity estimates and what the user said. These checks govern the query and evidence inputs. The visible reply is assessed by the offline audit. The implementation retains the latest event per source and the two preceding exchanges. The freshness windows are 10 minutes for power events and 15 minutes for user declarations.
+The coordinator checks the structured outputs of the first two roles. The reply instructions require the model to preserve the distinction among measurements, estimates and user statements, and to use the time interval returned by the metric service. The prototype retains the two preceding exchanges and the latest event per source. It marks television power events as recent for ten minutes and user statements for fifteen minutes.
 
-In one scene, the user reports reading a novel in another room. While that topic continues, the television power changes from 1.0 to 70.6 W at 12:41. At the next turn both items are available. The declaration is evidence about the user's activity and the power event is evidence about the appliance. The conversation can stay on the novel until the person asks about the television.
+In one scripted exchange, the user says they are reading a novel in another room. At 12:41, the television power rises from 1.0 to 70.6~W. The assistant can refer to both items on later turns. The statement describes what the user reported doing, while the power change describes the appliance. Keeping the sources distinct allows a reply about the television to use the measured change without assigning the user to the room or attributing viewing behaviour to them.
 
 \section{\uppercase{Evaluation}}
 \label{sec:evaluation}
 
-We ask whether the camera can recognise the target user in the household (RQ1), whether dialogue replies remain consistent with supplied evidence (RQ2), and whether a structured event can carry a detail beyond the short transcript (RQ3). The three assessments use different units of analysis.
+The evaluation addresses three questions at different levels. The recognition trial examines whether the camera can identify the target resident (RQ1). The dialogue review examines how replies use evidence across turns (RQ2). The paired event test isolates the effect of supplying a detail in a structured event (RQ3).
 
 \subsection{Household Recognition}
 \label{subsec:eval-face}
 
-The reported trial comprised 50 recognition attempts concerning the target resident in a four-person household, including her spouse and two children aged 11 and 14. Reported accuracy was 96\%, equivalent to 48 correct outcomes. The available aggregate does not specify probe composition, error types or capture conditions. The result is target-user recognition within one household. A follow-up protocol can distinguish enrolled and non-enrolled probes and record false assignment, missed identification and abstention~\cite{grother2019frvt}.
+The target-user trial comprised 50 recognition attempts in a household that included the resident's spouse and two children aged 11 and 14. It yielded 48 correct outcomes (96\%). The available aggregate gives the overall result for this household. It leaves probe composition, acquisition conditions and the distribution of errors unresolved.
 
-\begin{table*}[!t]
-\centering
-\caption{Scenario-level audit of the revised dialogue configuration. Each count gives replies meeting the turn-specific criterion over turns in that scenario.}
-\label{tab:scenes}
-\small
-\begin{tabularx}{\textwidth}{@{}Yr@{\qquad}Yr@{}}
-\hline
-Scenario & Pass / turns & Scenario & Pass / turns \\
-\hline
-Kitchen greeting and evidence & 3/3 & No reliable current activity & 3/3 \\
-Recent shower estimate & 1/3 & Steps and temporal scope & 3/3 \\
-Television and unknown viewer & 3/3 & Reading and delayed recall & 4/6 \\
-Exercise and morning scope & 3/3 & Kitchen correction & 3/4 \\
-Watch bedtime-mode end & 3/3 & Television event during dialogue & 4/4 \\
-Rest and movement & 2/3 & Physical activity preference & 2/3 \\
-Kitchen-use clarification & 2/3 & Food-choice preference & 2/3 \\
-Humidity and activity & 3/3 & \textbf{Total} & \textbf{41/50} \\
-\hline
-\end{tabularx}
-\end{table*}
-
-\subsection{Dialogue Replay and Scoring}
+\subsection{Dialogue Evaluation}
 \label{subsec:eval-replay}
 
-Fifteen scripted situations provide 50 user turns and 150 model calls. Scenes include kitchen use, shower estimation, exercise, the watch mode, rest, step totals, appliance events, user corrections and recall. Two scenarios introduce a physical activity or food preference. The query time can advance between turns to include new observations or test declaration age. The replay uses text inputs and one fixed sensor archive.
+The dialogue evaluation comprised 50 scripted user turns grouped into 15 exchanges. Each turn was assigned a reference time within the 72-hour observation period or at its endpoint. The Spanish prompts represent routine situations, including greetings, questions about recent activity, follow-ups about measurements and corrections of activity estimates. Two exchanges introduced goals concerning daily movement and vegetable intake, allowing the model to formulate suggestions in the context of the conversation.
 
-A single LLM-assisted rubric audit scores each visible reply. A pass requires the appropriate scope and source and an acknowledgement of uncertainty where evidence is insufficient. The numeric subset scores requested values independently of attribution, with a one-minute tolerance for an estimated shower time. The initial and revised configurations use the same 50 messages, query times, data and criteria. The revision makes the source and reference of selected readings explicit and gives the response model shorter instructions and relevant evidence for clear requests. For the last adjustment, dialogues were rerun from the first affected turn and unchanged prefixes were retained. This comparison describes development performance on these scenarios. Inference used temperature zero, a 4,096-token context and up to 160 output tokens per call.
-
-\begin{table}[t]
-\centering
-\caption{Recognition and paired dialogue replay. Numeric checks overlap with sensor and metric grounding.}
-\label{tab:results}
-\small
-\begin{tabular}{@{}lrr@{}}
-\hline
-Evaluation & Initial & Revised \\
-\hline
-Target-user face recognition & \multicolumn{2}{c}{48/50 (96\%)} \\
-Dialogue evidence consistency & 34/50 & 41/50 \\
-\quad Sensor and metric grounding & 12/25 & 21/25 \\
-\quad Context and event grounding & 19/22 & 18/22 \\
-\quad Goal-aligned suggestions & 3/3 & 2/3 \\
-\quad Numeric subset & 7/8 & 8/8 \\
-\hline
-\end{tabular}
-\end{table}
-
-Table~\ref{tab:scenes} gives the scenario breakdown. In the exercise questions the engine returned a bounded result. In the humidity questions a correct number could still be accompanied by an incorrect explanation. The replay script records the original message, time cutoff and selected operation, together with the available episodes, role exchanges and final reply. This allows review at the level of a single answer. The trace identifies the preprocessed export by its SHA-256 digest. The event probe reuses the local model and fixtures from that archive, with scripted declarations supplied separately.
+An LLM-assisted rubric review examined the visible replies against the sensor evidence and the preceding dialogue. It checked the use of the requested period and source, the distinction between observations and estimates, and the handling of missing evidence. For quantitative questions, it also checked the reported value against the metric service output. The trace links each reply to the user turn, reference time, selected operation and contextual evidence.
 
 \subsection{Paired Event-Payload Probe}
 \label{subsec:eval-probe}
 
-The probe uses the initial dialogue configuration and invokes its conversational role twice per question. It holds \(t_0\), model, prompt, short transcript, metrics and activity context fixed. The conditions differ only in whether the event is supplied, and their order alternates. Eight questions ask for a detail in a scripted self-report after two unrelated exchanges. Four ask for power immediately before and after a recorded jump. Both conditions retain the current power and its rolling-reference difference. A recall case passes when the target detail is present. A power case passes when both numbers appear in the correct order. When the event is removed, the target is unavailable by design. The control distinguishes appropriate abstention from an unsupported answer about that target.
+The event probe invokes the conversational role twice for each of 12 questions. For each pair, it holds the reference time, model, question, preceding dialogue, metrics and activity context fixed. The conditions differ in whether the event list contains the target event, and their order alternates across pairs. Eight questions ask for a detail from a scripted user statement after two unrelated exchanges. Four ask for the values immediately before and after a recorded change in television power. For the power cases, the fixed metric context includes the current reading and its difference from the rolling median.
+
+The recovery check matches the requested detail in the reply or, for power questions, both values in the requested order. A separate reading of the replies assesses whether the model correctly attributes recovered details and how it responds when the event is withheld.
 
 \begin{table}[t]
 \centering
@@ -321,49 +288,22 @@ Total & 12/12 & 0/12 \\
 \end{tabularx}
 \end{table}
 
-\subsection{Results and Failure Analysis}
+\subsection{Results and Analysis}
 \label{subsec:eval-findings}
 
-Evidence-consistent replies increased from 34/50 (68\%) to 41/50 (82\%). Eleven turns improved and four regressed. Sensor and metric grounding accounted for the largest gain, while context and event grounding fell from 19/22 to 18/22 and goal alignment from 3/3 to 2/3. The revised reply gave the correct watch-mode end, distinguished the time of a humidity reading from the start of a rise, and reported eight observed minutes, 858 steps and 109.5 beats/min for the exercise interval. It still missed a book detail present in the event context. In the revised trace, median text-turn latency was 13.1 s and the 90th percentile was 18.9 s on an Intel Core i7-13620H CPU, excluding audio and camera acquisition.
+The dialogue review illustrates why a correct calculation and a well-grounded reply are distinct outcomes. In an exercise follow-up, the assistant reported the eight-minute interval available at the query cutoff. When asked about exercise that morning, it used a different time window and reported that no clear episode was present. In the humidity exchange, it identified 13:29 as the time of the reading and left the onset of the rise unresolved. In the watch exchange, it reported that bedtime mode ended at 09:57 and distinguished that event from getting out of bed. In a recall exchange, however, it denied having been told the book genre even though the event context contained the user's statement. The reply therefore failed to use available evidence.
 
-\begin{table}[!t]
-\centering
-\caption{Illustrative errors and changes between the two configurations.}
-\label{tab:failures}
-\small
-\begin{tabularx}{\columnwidth}{@{}>{\raggedright\arraybackslash}p{0.26\columnwidth}Y@{}}
-\hline
-Failure & Reply and evidence \\
-\hline
-Episode binding & The initial reply used a bathroom end at 09:52. The revision used the watch flag end at 09:57. \\
-Reference semantics & The initial reply called the humidity reference a mean. The revision used the two-hour median. \\
-Appliance claim & The revised reply inferred television state from the person's reading rather than using the measured 0.9 W. \\
-User report & The revised reply missed a book genre that the user had stated and that the event payload retained. \\
-\hline
-\end{tabularx}
-\end{table}
-
-The paired probe recovered 12/12 target details with the event and 0/12 with it removed (Table~\ref{tab:probe}). One response recovered the detail while reversing who had said it. When the target was withheld, ten replies indicated that it was unavailable and two gave unsupported details. One named a different plant and one treated a current reading as the value before a power jump. This control exposes guessing when the required evidence is absent. The full dialogue replay separately tests selection and interpretation.
+The paired probe recovered all 12 target details when the event was supplied and none when it was withheld (Table~\ref{tab:probe}). One successful retrieval attributed the detail to the wrong speaker. In the withheld-event condition, ten replies acknowledged that the information was unavailable and two supplied unsupported details. One named a different plant. The other reported the current power reading as the value before the change. These cases show why retrieval, source attribution and appropriate abstention require separate checks.
 
 \FloatBarrier
-\section{\uppercase{Discussion}}
+\section{\uppercase{Discussion and Conclusions}}
 \label{sec:discussion}
 
-Typed metric queries make the calculation and time scope inspectable. They limit coverage to operations in the catalogue. A valid follow-up can require an interval or joint measure outside that catalogue. The watch-mode error illustrates how the correct source can be available while the model answers from the wrong episode. A future replay can separate follow-up resolution from composition and check that the answer uses the requested result.
+This work presents a reference architecture for linking household sensing to dialogue through interfaces for identity, time-scoped queries and contextual events. The household implementation combines Reachy Mini face recognition with metric services and activity estimates. The recognition trial yielded 96\% target-user recognition in one household. The text evaluation illustrates how these services can support follow-up questions, and the paired probe shows that event availability and correct attribution are separate properties of a reply.
 
-Source tags also preserve distinctions without guaranteeing their use. The event probe isolates information recovery on deliberately constructed questions, with one model and one small set of inputs. It does not test extraction quality or compare the event list with a longer transcript or retrieval from an archive. The replay has correlated turns, development-time exposure and a single rubric review. Independent reviewers and held-out scenarios would provide stronger evidence of dialogue quality. Independently annotated activity and boundary times would be required to estimate HAR accuracy.
+The three evaluations address different parts of the system. The recognition aggregate does not separate missed identifications, incorrect assignments and abstentions. The dialogue review uses scripted turns grouped within exchanges and a single sensor archive. The paired test supplies the target event directly, so it isolates detail retrieval from the upstream tasks of detecting and selecting events. The activity rules provide contextual hypotheses, and independent activity annotations would be needed to estimate recognition accuracy and boundary error.
 
-The visual result covers one household and an aggregate set of attempts. A prospective integrated study should record enrolled and unknown probes, acquisition conditions, rejection and wrong-session selections, along with spoken interaction outcomes. The present tests address visual recognition and text grounding separately. Local processing changes where data are handled, while consent, access and diagnostic retention depend on the deployment protocol.
-
-Comparison with action-centred systems suggests testing device control separately. SimuHome~\cite{seo2026simuhome} provides a way to verify state changes and time-dependent workflows in simulation. A longer study of physical activity and food preferences would require outcomes and follow-up periods suited to those goals. Here, goal alignment describes the relevance of suggestions within the turn.
-
-\paragraph{Reproducibility.}
-The implementation separates the turn fixtures, model calls and review outcomes. The full replay runner generates the dialogue trace from the preprocessed export. The paired-probe runner accepts the dialogue trace and reconstructs the environmental event fixtures from the same export. It records both answers and the target-recovery decision for each pair. The time window and sensor snapshot must match when reproducing the numerical results. The rubric scores are tied to the recorded replies, so a fresh run should be reviewed against the same criteria. Facial recognition is evaluated separately from these scripts and would require a documented camera trial and access to its enrolment and test protocol.
-
-\section{\uppercase{Conclusions}}
-\label{sec:conclusion}
-
-The reference architecture separates observations, contextual services and interaction through reusable interfaces. Its household implementation connects Reachy Mini visual session selection with metric tools, HAR context and local dialogue. The study reported 96\% target-user recognition, and evidence-consistent replies rose from 34/50 to 41/50 on the same development scenarios after revising prompts and evidence selection. The withheld-event control and the remaining response errors motivate checking what an answer asserts as well as which facts it retrieves.
+A prospective study should evaluate session selection and spoken dialogue together during routine household use. Recording acquisition conditions and separating acceptance, rejection and incorrect assignment would clarify when visual session selection succeeds or defers~\cite{grother2019frvt}. Independent annotation of activities and replies would allow the study to distinguish an upstream recognition error from a failure to use the available evidence. Over longer periods, the same design could examine whether suggestions remain relevant as residents' goals change. Device actions can be tested separately against known state transitions, for example in SimuHome~\cite{seo2026simuhome}.
 
 % Add verified authors, affiliations, acknowledgements, ethics/consent
 % reporting as applicable, and the public source-code URL before submission.
