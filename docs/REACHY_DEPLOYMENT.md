@@ -1,5 +1,38 @@
 # Despliegue en Reachy Mini
 
+## Escena real de Mariola con tres agentes
+
+Ejecuta desde la raíz del repositorio con Ollama disponible, el modelo indicado
+en `OLLAMA_MODEL` cargable y las dependencias de `requirements-reachy.txt`
+instaladas en un entorno dedicado. Arranca el lanzador en el ordenador para que
+Whisper transcriba la voz y Piper sintetice la respuesta allí. Reachy aporta el
+micrófono y el altavoz por la red. Los agentes de métricas, reconocimiento de
+actividad y conversación se ejecutan en cada turno sobre
+`dataset_home_real/all_data_72hours_reference.txt`.
+
+La escena fija la hora en el 2 de noviembre de 2026 a las 17:09. El registro sitúa
+a Mariola en el salón hasta las 17:07 y en la cocina desde las 17:08, cuando se
+activa el sensor del armario de vasos. Puedes responder al saludo interpretando a
+Mariola. Di «adiós» para terminar.
+
+En PowerShell, con Reachy Mini Wireless en la misma red y una voz Piper en español:
+
+```powershell
+$env:STT_MODEL = 'small'
+python -m smart_home_agent.reachy_har_demo --host 192.168.0.33 --tts-model "$env:USERPROFILE/.piper-voices/es_ES-davefx-medium.onnx"
+```
+
+Usa `STT_MODEL_PATH` si ya tienes el modelo Whisper en una carpeta local. La
+conexión en red requiere un entorno compatible con el audio WebRTC del SDK.
+`OLLAMA_URL` selecciona el servidor que ejecuta Qwen. Para comprobar la escena y
+medir el tiempo de los tres agentes desde la consola, ejecuta:
+
+```powershell
+python -m smart_home_agent.reachy_har_demo --check
+```
+
+## Agente para los escenarios simulados
+
 Este proyecto mantiene el agente Qwen y sus tools en el backend. Reachy solo
 proporciona audio y gestos a través de `ReachyInterface`.
 
