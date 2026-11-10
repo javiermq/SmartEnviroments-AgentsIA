@@ -9,34 +9,74 @@ import io
 import logging
 import os
 from pathlib import Path
+import sys
 from time import monotonic
 import wave
 
 from .config import Settings
 from .historical_har import History
-from .human_console_bridge import LocalTTS
+from .human_console_bridge import LocalTTS, configure_windows_cuda_dlls
 from .interfaces.reachy import AudioClip, ListenTimeout, ReachyInterface
-from .local_har_demo import LocalDemo
+from .local_har_demo import EXERCISE_CHECK, LocalDemo
 
 
 T0 = '2026-11-02T17:09:00+01:00'
 DATA = Path(__file__).resolve().parent.parent / 'dataset_home_real' / 'all_data_72hours_reference.txt'
-OPENING = ('Hola, Mariola. Parece que acabas de pasar del salón a la cocina. '
-           '¿Estás preparando algo para tomar?')
+STYLE = DATA.parent / 'mariola' / 'agent_style.txt'
+OPENING = 'Hola, Mariola. ¿Qué tal va la tarde?'
 IDLE_SECONDS = 15 * 60
 LOGGER = logging.getLogger(__name__)
 
 
 class MariolaDemo(LocalDemo):
+    def __init__(self, history: History, model: str, url: str, *, trace: bool = False) -> None:
+        super().__init__(history, model, url)
+        self.trace = trace
+        self.style = STYLE.read_text(encoding='utf-8-sig').strip()
+
     def ask(self, prompt, context, schema=None):
         if schema is None:
-            prompt += (
-                ' La señal cocina_vasos13 indica el estado del sensor del armario de los vasos. '
-                ' Una activación aporta un indicio de uso de la cocina. '
-                ' Respeta el minuto de cada lectura y deja como desconocido qué se preparaba '
-                ' hasta que la persona lo cuente.'
+            voice_style = (
+                'Eres Reachy, un robot. Mariola es la persona que habla contigo. Sus comidas, '
+                'sueño y otras actividades le pertenecen a ella. Tú conversas y das ideas. '
+                'No cocinas, comes ni duermes. Si no entiendes la frase, pídele que la repita. '
+                'Cuando falte el dato que pide, di qué queda por saber.\n'
             )
-        return super().ask(prompt, context, schema)
+            activity = context.get('contexto_actividad') or {}
+            if activity.get('actividad') == 'cocinar':
+                voice_style += (
+                    'La etiqueta «cocinar» es un indicio de uso de la cocina. El valor '
+                    'cocina_vasos13=1 indica que se activó el sensor del armario de los vasos. '
+                    'Deja sin determinar qué se preparaba hasta que Mariola lo cuente.\n'
+                )
+            prompt = f'{voice_style}\nESTILO DE CONVERSACIÓN:\n{self.style}\n\n{prompt}'
+        if not self.trace:
+            return super().ask(prompt, context, schema)
+
+        agent = 'CONVERSACIÓN'
+        if schema is not None:
+            agent = 'MÉTRICAS' if 'consulta' in schema['properties'] else 'HAR'
+        print(f'[{agent}] Procesando…', flush=True)
+        started = monotonic()
+        answer = super().ask(prompt, context, schema)
+        print(f'[{agent}] {monotonic() - started:.1f} s · {answer}', flush=True)
+        return answer
+
+    def metrics(self, question, t0, rows, conversation):
+        result = super().metrics(question, t0, rows, conversation)
+        if self.trace and 'descanso' in result:
+            print(f"[MÉTRICAS] Modo descanso del reloj · {result['descanso']}", flush=True)
+        return result
+
+    def general(self, question, t0, metrics, selected, conversation=(), events=()):
+        answer, context = super().general(question, t0, metrics, selected, conversation, events)
+        if self.trace and 'descanso' in metrics:
+            print(f'[HAR] Tramo del reloj · {selected}', flush=True)
+            print(f'[CONVERSACIÓN] Respuesta con datos verificados · {answer}', flush=True)
+        elif self.trace and EXERCISE_CHECK.fullmatch(question):
+            print(f"[HAR] Ejercicio en el intervalo · {metrics['ejercicio']}", flush=True)
+            print(f'[CONVERSACIÓN] Respuesta con datos verificados · {answer}', flush=True)
+        return answer, context
 
 
 class PiperVoice:
@@ -54,7 +94,7 @@ class PiperVoice:
             return AudioClip(samples.astype(np.float32)[:, None] / 32768, wav.getframerate())
 
 
-async def run(demo: LocalDemo, interface: ReachyInterface) -> None:
+async def run(demo: LocalDemo, interface: ReachyInterface, *, trace: bool = False) -> None:
     await interface.start()
     try:
         media = interface.robot.media
@@ -77,7 +117,11 @@ async def run(demo: LocalDemo, interface: ReachyInterface) -> None:
             except ListenTimeout:
                 continue
             if not text:
+                if trace:
+                    print('[STT] Audio recibido, sin frase reconocible.', flush=True)
                 continue
+            if trace:
+                print(f'\n[STT] {text}', flush=True)
             if text.casefold().strip(' .,¡!¿?') in {'adiós', 'adiós reachy', 'adiós, reachy'}:
                 await interface.speak('Hasta luego.')
                 break
@@ -94,7 +138,11 @@ async def run(demo: LocalDemo, interface: ReachyInterface) -> None:
                 events = result['eventos']
                 conversation = (conversation + [{'usuario': text}, {'agente': answer}])[-4:]
                 LOGGER.info('Respuesta de los tres agentes en %.1f s', monotonic() - started)
+                if trace:
+                    print(f'[TTS] Sintetizando para el altavoz de Reachy · {answer}', flush=True)
                 await interface.speak(answer)
+                if trace:
+                    print('[REACHY] Reproducción terminada. Vuelve a escuchar.', flush=True)
             deadline = monotonic() + IDLE_SECONDS
     finally:
         await interface.close()
@@ -105,10 +153,11 @@ def main() -> None:
     parser.add_argument('--host', help='Dirección de Reachy Mini para usar audio por red.')
     parser.add_argument('--tts-model', help='Ruta del modelo de voz Piper en español.')
     parser.add_argument('--check', action='store_true', help='Prueba los tres agentes desde la consola.')
+    parser.add_argument('--trace', action='store_true', help='Muestra la transcripción y el paso por cada agente.')
     args = parser.parse_args()
 
     settings = Settings.from_env()
-    demo = MariolaDemo(History(DATA), settings.ollama_model, settings.ollama_url)
+    demo = MariolaDemo(History(DATA), settings.ollama_model, settings.ollama_url, trace=args.trace)
     if args.check:
         started = monotonic()
         result = demo.respond('¿Qué indicios hay de que estuve usando la cocina justo antes?', T0)
@@ -128,10 +177,12 @@ def main() -> None:
         local_tts.warm()
         voice = PiperVoice(local_tts)
 
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
-    interface = ReachyInterface(settings, tts=voice, speech_rms_threshold=0.015)
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', stream=sys.stdout)
+    if settings.stt_device == 'cuda':
+        configure_windows_cuda_dlls()
+    interface = ReachyInterface(settings, tts=voice, speech_rms_threshold=0.015, speech_pre_roll_seconds=0.6)
     try:
-        asyncio.run(run(demo, interface))
+        asyncio.run(run(demo, interface, trace=args.trace))
     except KeyboardInterrupt:
         pass
 

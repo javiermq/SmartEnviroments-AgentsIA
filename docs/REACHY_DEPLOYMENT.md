@@ -24,8 +24,11 @@ python -m smart_home_agent.reachy_har_demo --host 192.168.0.33 --tts-model "$env
 
 Usa `STT_MODEL_PATH` si ya tienes el modelo Whisper en una carpeta local. La
 conexión en red requiere un entorno compatible con el audio WebRTC del SDK.
-`OLLAMA_URL` selecciona el servidor que ejecuta Qwen. Para comprobar la escena y
-medir el tiempo de los tres agentes desde la consola, ejecuta:
+Añade `--trace` para ver la transcripción, el resultado y el tiempo de cada
+agente y la reproducción. `OLLAMA_URL` selecciona el servidor que ejecuta Qwen.
+Este lanzador también admite un servidor local compatible en
+`/v1/chat/completions`, por ejemplo llama.cpp con CUDA. Para comprobar la escena
+y medir el tiempo de los tres agentes desde la consola, ejecuta:
 
 ```powershell
 python -m smart_home_agent.reachy_har_demo --check

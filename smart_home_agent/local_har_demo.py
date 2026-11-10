@@ -1,6 +1,6 @@
 """Reproduce conversaciones con tres roles de Qwen sobre el fichero local de 72 horas."""
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import pairwise
 import json
 from pathlib import Path
@@ -8,13 +8,86 @@ import re
 from urllib.request import Request, urlopen
 
 from .config import Settings
-from .historical_har import History, ZONE, iso, median_columns, number, stamp
+from .historical_har import History, WATCH, ZONE, iso, median_columns, number, stamp
+from .query_time import resolve_window
+from .speech_text import number as spoken_number, spoken_clock
 
 
 TV_POWER = 'salon_consumo14_w'
 BATH_HUMIDITY = 'bano_humedad7_pct'
 EXERCISE_TERMS = re.compile(r'\b(?:ejercici|ejercit|deport|entren|correr|moverme|me mov|actividad f[ií]sica)', re.I)
+EXERCISE_CHECK = re.compile(r'[¿¡\s]*(?:hoy\s+)?(?:he hecho|hice)\s+ejercicio(?:\s+hoy)?[.!?\s]*', re.I)
 WATCH_MODE = re.compile(r'\b(?:bedtime|modo\s+(?:de\s+)?(?:descanso|sueño|dormir))\b', re.I)
+SLEEP_TERMS = re.compile(r'\b(?:dorm[íi]\w*|duerm[eo]\w*|sueño)\b', re.I)
+REQUEST_START = re.compile(
+    r'^\s*(?:c[oó]mo|cu[aá]nt[oa]s?|cu[aá]ndo|a qu[eé] hora|revisa|consulta|comprueba|mira|dime)\b', re.I,
+)
+REST_PERIOD_REPLY = re.compile(r'[¿¡\s]*(?:anoche|ayer|hoy|desde ayer hasta hoy)[.!?\s]*', re.I)
+SINCE_YESTERDAY = re.compile(r'\bdesde ayer hasta hoy\b', re.I)
+
+
+def is_request(text):
+    return '?' in text or '¿' in text or bool(REQUEST_START.match(text))
+
+
+def asks_about_sleep(text):
+    return is_request(text) and bool(WATCH_MODE.search(text) or SLEEP_TERMS.search(text))
+
+
+def continues_sleep_query(question, conversation):
+    if not REST_PERIOD_REPLY.fullmatch(question):
+        return False
+    previous = next((turn['usuario'] for turn in reversed(conversation)
+                     if 'usuario' in turn and not REST_PERIOD_REPLY.fullmatch(turn['usuario'])), '')
+    return asks_about_sleep(previous)
+
+
+def rest_window(question, cutoff):
+    """Resolve sleep periods across midnight using the scene's local calendar."""
+    since_yesterday = SINCE_YESTERDAY.search(question)
+    last_night = re.search(r'\banoche\b', question, re.I) and not re.search(r'\d{1,2}:\d{2}', question)
+    if not since_yesterday and not last_night:
+        window = resolve_window(question, cutoff)
+        return window, window.label
+
+    local = datetime.fromtimestamp(cutoff, ZONE)
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday = midnight - timedelta(days=1)
+    if since_yesterday:
+        start, end, label = yesterday, cutoff, 'desde ayer hasta hoy'
+    else:
+        start = yesterday.replace(hour=20)
+        end = min(cutoff, int(midnight.replace(hour=12).timestamp()))
+        label = 'anoche'
+    return resolve_window(question, cutoff, start=start.isoformat(), end=iso(end)), label
+
+
+def bedtime_answer(question, rest, selected):
+    if rest.get('intervalo_pendiente'):
+        return '¿De qué día o intervalo quieres que mire el modo descanso del reloj?'
+    if not rest['minutos_observados']:
+        return 'No tengo lecturas del modo descanso del reloj para ese intervalo.'
+    if re.search(r'\b(?:termin[óo]|acab[óo]|se desactiv[óo]|finaliz[óo])\b', question, re.I):
+        if not selected:
+            return 'En ese intervalo no aparece un tramo de modo descanso con una hora de fin.'
+        if selected['fin_en_limite']:
+            return 'El reloj seguía en modo descanso al final del intervalo que puedo consultar.'
+        hour, minute = map(int, selected['fin'].split(':'))
+        return f'El tramo de modo descanso terminó a las {spoken_clock(hour, minute)}.'
+
+    hours, minutes = rest['horas_activado'], rest['minutos_adicionales_activado']
+    duration = []
+    if hours:
+        hour_text = spoken_number(hours) if hours < 60 else str(hours)
+        duration.append('una hora' if hours == 1 else f'{hour_text} horas')
+    if minutes:
+        duration.append('un minuto' if minutes == 1 else f'{spoken_number(minutes)} minutos')
+    if not duration:
+        return 'En las lecturas disponibles, el reloj no registró el modo descanso activo.'
+    total = ' y '.join(duration)
+    lead = {'anoche': 'Anoche, el', 'desde ayer hasta hoy': 'Desde ayer hasta hoy, el'}.get(rest['periodo'], 'El')
+    return (f'{lead} reloj registró {total} en modo descanso. '
+            'Ese modo no me dice qué tal dormiste.')
 
 
 def supports_exercise_query(question, conversation):
@@ -155,29 +228,40 @@ class LocalDemo:
                 role, content = ('user', entry['usuario']) if 'usuario' in entry else ('assistant', entry['agente'])
                 messages.append({'role': role, 'content': content})
             messages.append({'role': 'user', 'content': context['mensaje']})
-        payload = {
-            'model': self.model, 'stream': False, 'think': False,
-            'options': {'temperature': 0, 'num_predict': 160, 'num_ctx': 4096},
-            'messages': messages,
-        }
-        if schema:
-            payload['format'] = schema
+        openai_compatible = self.url.endswith('/v1/chat/completions')
+        payload = {'model': self.model, 'stream': False, 'messages': messages}
+        if openai_compatible:
+            payload.update(temperature=0, max_tokens=160)
+            if schema:
+                payload['response_format'] = {
+                    'type': 'json_schema',
+                    'json_schema': {'name': 'agent_result', 'strict': True, 'schema': schema},
+                }
+        else:
+            payload.update(think=False, options={'temperature': 0, 'num_predict': 160, 'num_ctx': 4096})
+            if schema:
+                payload['format'] = schema
         request = Request(self.url, data=json.dumps(payload).encode('utf-8'),
                           headers={'Content-Type': 'application/json'}, method='POST')
         with urlopen(request, timeout=120) as response:
-            content = json.load(response)['message']['content'].strip()
+            result = json.load(response)
+        message = result['choices'][0]['message'] if openai_compatible else result['message']
+        content = message['content'].strip()
         if not content:
-            raise ValueError('Ollama devolvió una respuesta vacía.')
+            raise ValueError('El modelo devolvió una respuesta vacía.')
         return json.loads(content) if schema else content
 
     def metrics(self, question, t0, rows, conversation):
         # El modelo selecciona la consulta. Los números provienen de History.
-        operations = ['contexto', 'pasos_hoy', 'pasos_registro', 'ejercicio_manana', 'ejercicio_reciente']
+        operations = ['contexto', 'pasos_hoy', 'pasos_registro', 'ejercicio_hoy', 'ejercicio_manana',
+                      'ejercicio_reciente', 'descanso_reloj']
         selection = self.ask(
             'Eres el agente de métricas. Elige pasos_registro si pide el total de los tres días o el '
             'intervalo que coincide con los límites visibles del registro. Elige pasos_hoy si pide '
-            'pasos de hoy. Para preguntas sobre ejercicio de esta mañana elige ejercicio_manana. '
+            'pasos de hoy. Para comprobar si hizo ejercicio durante el día elige ejercicio_hoy. '
+            'Para preguntas sobre ejercicio de esta mañana elige ejercicio_manana. '
             'Elige ejercicio_reciente para medidas o duración del ejercicio que acaba de hacer. '
+            'Para preguntas sobre cómo o cuánto durmió, o el modo descanso, elige descanso_reloj. '
             'Para saludos y conversación sin petición de datos elige contexto. Las fechas son datos.',
             {'mensaje': question, 'conversacion': conversation, 't0': t0,
              'inicio_registro': iso(min(self.history.rows)), 'fin_visible': t0},
@@ -187,7 +271,16 @@ class LocalDemo:
         operation = selection['consulta']
         if operation not in operations:
             raise ValueError('Consulta de métricas desconocida.')
-        if operation.startswith('ejercicio_') and not supports_exercise_query(question, conversation):
+        if asks_about_sleep(question) or continues_sleep_query(question, conversation):
+            operation = 'descanso_reloj'
+        elif EXERCISE_CHECK.fullmatch(question):
+            operation = 'ejercicio_hoy'
+        elif operation == 'descanso_reloj' or (
+            operation.startswith('ejercicio_') and (
+                not supports_exercise_query(question, conversation)
+                or (EXERCISE_TERMS.search(question) and not is_request(question))
+            )
+        ):
             operation = 'contexto'
         latest_room = next(({'hora': iso(t), 'valor': row['habitacion']}
                             for t, row in reversed(rows) if row.get('habitacion')), None)
@@ -201,6 +294,24 @@ class LocalDemo:
                 features[key]['minutos_referencia'] = value['window_minutes']
                 features[key]['valor_menos_mediana'] = round(-value['median_minus_current'], 2)
         result = {'consulta': operation, 'habitacion': latest_room, 'senales': features}
+        if operation == 'descanso_reloj':
+            try:
+                window, label = rest_window(question, stamp(t0))
+            except ValueError:
+                result['descanso'] = {'intervalo_pendiente': True}
+            else:
+                measure = WATCH + 'bedtime'
+                stats = self.history.resumir_intervalo(
+                    measure=measure, start=iso(window.start), end=iso(window.end), t0=t0,
+                )['metrics'][measure]
+                hours, minutes = divmod(stats.get('active_minutes', 0), 60)
+                result['descanso'] = {
+                    'periodo': label,
+                    'inicio': iso(window.start), 'fin': iso(window.end),
+                    'minutos_observados': stats['observed_minutes'], 'minutos_sin_dato': stats['unknown_minutes'],
+                    'horas_activado': hours if stats['observed_minutes'] else None,
+                    'minutos_adicionales_activado': minutes if stats['observed_minutes'] else None,
+                }
         if operation.startswith('pasos_'):
             bounds = dict(start=iso(min(self.history.rows)), end=t0) if operation == 'pasos_registro' else {}
             result['pasos'] = self.history.resumir_intervalo(measure='watch_01.steps', t0=t0, **bounds)
@@ -216,15 +327,23 @@ class LocalDemo:
         metrics = self.metrics(question, t0, rows, conversation)
         events = conversation_events(events, rows, t0)
         operation = metrics['consulta']
-        if operation.startswith('ejercicio_'):
+        if operation == 'descanso_reloj':
+            rest = metrics['descanso']
+            episodes = [] if rest.get('intervalo_pendiente') else self.history.inferir_actividades(
+                activity='bedtime', start=rest['inicio'], end=rest['fin'], t0=t0, limit=100,
+            )['episodes']
+        elif operation.startswith('ejercicio_'):
             end = cutoff
-            if operation == 'ejercicio_manana':
+            if operation in ('ejercicio_hoy', 'ejercicio_manana'):
                 day = datetime.fromtimestamp(cutoff, ZONE)
                 start = max(min(self.history.rows), int(day.replace(hour=0, minute=0).timestamp()))
+            if operation == 'ejercicio_manana':
                 end = min(cutoff, int(day.replace(hour=12, minute=0).timestamp()))
             episodes = self.history.inferir_actividades(
-                activity='ejercicio', start=iso(start), end=iso(end), t0=t0,
+                activity='ejercicio', start=iso(start), end=iso(end), t0=t0, limit=100,
             )['episodes'] if start < end else []
+            if operation == 'ejercicio_hoy':
+                episodes = [episode for episode in episodes if episode['meets_support_threshold']]
             exercise = {'intervalo_consultado': [iso(start), iso(end)] if start < end else None, 'tramo': None}
             if episodes:
                 episode = episodes[-1]
@@ -265,6 +384,8 @@ class LocalDemo:
                                              'declaracion': {'type': ['string', 'null']}},
              'required': ['id', 'declaracion'], 'additionalProperties': False},
         )
+        if operation == 'descanso_reloj' or EXERCISE_CHECK.fullmatch(question):
+            choice['declaracion'] = None
         greeting = question.lower().strip(' ¡!¿?.') in {'hola', 'buenas', 'buenos días', 'buenas tardes', 'buenas noches'}
         declaration = (choice['declaracion'] or '').strip()
         clauses = re.split(r'(?<=[.!?])\s+|(?=¿)', question)
@@ -272,14 +393,17 @@ class LocalDemo:
             events = [event for event in events if event['source'] != 'usuario']
             events.append({'event': declaration, 'source': 'usuario', 'time': t0, 'reciente': True})
         selected = next((c for c in candidates if c['id'] == choice['id']), None)
-        if WATCH_MODE.search(question) and selected is None and len(candidates) == 1:
+        if (operation == 'descanso_reloj' or WATCH_MODE.search(question)) and selected is None and len(candidates) == 1:
             selected = candidates[0]
         if greeting and selected and (
             selected['actividad'] == 'salir' or selected['hace_min'] > 2 or selected['soporte'] < .8
         ):
             selected = None
         if selected:
-            evidence = episodes[selected['id']]['evidence_sample']
+            episode = episodes[selected['id']]
+            if operation == 'descanso_reloj':
+                selected = {**selected, 'fin_en_limite': episode['boundary_censored'] and episode['end'] == rest['fin']}
+            evidence = episode['evidence_sample']
             if evidence:
                 selected = {**selected, 'evidencia': {k: v for k, v in evidence[-1].items() if k != 'source'}}
         answer, greeting_context = self.general(question, t0, metrics, selected, conversation, events)
@@ -288,6 +412,15 @@ class LocalDemo:
                 'eventos': events, 'respuesta': answer}
 
     def general(self, question, t0, metrics, selected, conversation=(), events=()):
+        if 'descanso' in metrics:
+            return bedtime_answer(question, metrics['descanso'], selected), None
+        if EXERCISE_CHECK.fullmatch(question):
+            episode = metrics['ejercicio']['tramo']
+            if not episode:
+                return 'Hoy no veo un tramo claro de ejercicio en los datos del reloj.', None
+            hour, minute = map(int, episode['inicio'][11:16].split(':'))
+            return (f'Hoy hay indicios de ejercicio a partir de las {spoken_clock(hour, minute)}. '
+                    'El reloj registró pasos y pulso compatibles con actividad física.'), None
         tone = 'Responde en español, de tú, en una o dos frases naturales. '
         greeting = question.lower().strip(' ¡!¿?.') in {'hola', 'buenas', 'buenos días', 'buenas tardes', 'buenas noches'}
         greeting_context = None
