@@ -128,7 +128,7 @@ Figure~\ref{fig:devices} is reserved for a photograph of the devices used in the
 
 \begin{itemize}
 \item \textbf{Reachy Mini robot.} Its camera supplies face images for session selection, and its microphone and speaker provide the interface for spoken interaction.
-\item \textbf{Google Pixel Watch.} The watch records steps, heart rate and its bedtime-mode flag.
+\item \textbf{Google Pixel Watch.} A background service on the watch records step counts, heart rate and the system's bedtime-mode flag as updates become available. The watch also provides UWB ranging with FiRa-compatible anchors for room-level localisation~\cite{anguita2025uwb}.
 \item \textbf{Indoor localisation.} Qorvo ultra-wideband (UWB) boards provide measurements used to estimate the resident's room.
 \item \textbf{Ambient devices.} Aqara Zigbee sensors and other Home Assistant channels record events involving kitchen objects and measurements such as bathroom humidity and television power.
 \end{itemize}
@@ -203,12 +203,34 @@ Entrance sensor & 81 & 1.9\% \\
 
 For bathroom humidity and television power, preprocessing stores the trailing median minus the current reading. The windows are two and 24 hours, respectively, and use the available observations, including the current reading. A television power event requires two readings at most five minutes apart, a rise of at least 20~W and a crossing from below to at least 20~W above the rolling median. The shower rule uses a separate comparison with the most recent humidity reading in the hour preceding the observed bathroom episode. It can use a humidity reading recorded up to ten minutes after the last bathroom observation.
 
-\subsection{Historical Queries and Activity Rules}
+\subsection{Reachy Mini Camera and Face Recognition}
+\label{subsec:face}
+
+The Reachy Mini client uses OpenCV and YuNet~\cite{wu2023yunet} to detect a single complete face. The default acquisition procedure requires a bounding box of at least 120 pixels per side and an intersection over union of at least 0.65 with the first box. The client collects five distinct frames during a stable acquisition lasting at least one second. It ranks the face crops by a score combining sharpness, exposure and the fraction of clipped pixels, then sends the three highest-ranked crops to a local vision service.
+
+The service aligns each face and obtains a 512-dimensional FaceNet embedding through DeepFace~\cite{schroff2015facenet,serengil2020lightface}. For each frame and enrolled profile, it takes the smallest cosine distance between the crop embedding and the profile's reference embeddings. It ranks profiles by their median distance across at least two valid frames. Acceptance requires a median distance of at most 0.50, a margin of at least 0.05 to the next candidate when one exists, and agreement from at least two individual frame decisions. The service returns an unknown identity when these conditions are unmet.
+
+Acquisition stability limits variation between frames. The distance threshold and margin address weak or ambiguous matches, and the frame agreement requirement reduces the influence of a single crop. When multiple faces are visible, the single-face requirement can delay a decision. The household trial reports aggregate outcomes using these configuration defaults.
+
+\subsection{Local Agent Integration}
+\label{subsec:case-agents}
+
+The prototype runs Qwen3-4B-Instruct-2507 in Q4\_K\_M quantisation through Ollama~\cite{qwen2025instruct}. The text evaluation fixes the resident profile and supplies an explicit reference time with each Spanish user turn. The coordinator makes three sequential model calls. The first selects a supported operation from the current turn and recent dialogue, and the metric engine computes the result. The second selects a candidate activity episode or abstains. It can also extract a statement directly from the user turn. The third generates a reply from selected evidence and recent dialogue.
+
+The coordinator checks the structured outputs of the first two roles. The reply instructions require the model to preserve the distinction among measurements, estimates and user statements, and to use the time interval returned by the metric service. The prototype retains the two preceding exchanges and the latest event per source. It marks television power events as recent for ten minutes and user statements for fifteen minutes.
+
+In one scripted exchange, the user says they are reading a novel in another room. At 12:41, the television power rises from 1.0 to 70.6~W. The assistant can refer to both items on later turns. The statement describes what the user reported doing, while the power change describes the appliance. Keeping the sources distinct allows a reply about the television to use the measured change without assigning the user to the room or attributing viewing behaviour to them.
+
+\subsubsection{Historical Queries and Activity Rules}
 \label{subsec:case-rules}
 
-The metric engine indexes the archive by minute and resolves relative requests against the local calendar. A query uses observations before its reference time \(t_0\). For an interval with \(N\) expected bins, let \(O_s\) and \(O_h\) denote the sets of minutes with recorded steps and heart rate. The engine computes the observed step total as \(\sum_{t\in O_s}s_t\) and, when \(O_h\) is non-empty, the mean heart rate as \(\sum_{t\in O_h}h_t/|O_h|\). It reports heart-rate coverage as \(|O_h|/N\). A recorded zero contributes a measurement, while a missing bin contributes no observation.
+The prototype separates the resolution of metric queries from the selection of activity context.
 
-Table~\ref{tab:rules} lists the rules used to generate activity candidates. For most rules, matching minutes separated by up to five minutes can be grouped, with intervening bins retained as interruptions or missing evidence. Support is the fraction of the resulting interval in which the rule holds. The default threshold of 0.8 distinguishes supported episodes from weaker candidates. An interval that reaches a query boundary may describe only part of an episode.
+\begin{itemize}
+\item \textbf{Metrics agent.} The agent selects a supported query from the user turn and recent dialogue. The metric service resolves relative time expressions against the local calendar and uses observations before the turn's reference time \(t_0\). It computes the step total and mean heart rate from the recorded values in the requested interval. Heart-rate coverage is the fraction of minutes with a reading. Recorded zeros count as observations, while missing values are excluded.
+
+\item \textbf{HAR context agent.} The rule engine generates candidate activity intervals from the sensor record (Table~\ref{tab:rules}). The agent selects the candidate relevant to the turn or leaves the activity unspecified. For most rules, the engine can group matching minutes separated by gaps of up to five minutes. It retains those gaps in the interval and classifies the episode as supported when at least 80\% of its minutes meet the rule. An episode that reaches the query boundary may represent only part of the activity.
+\end{itemize}
 
 \begin{table*}[t]
 \centering
@@ -229,43 +251,23 @@ Entrance & Entrance-area sensor event & Evidence of activity at the entrance, wi
 \end{tabularx}
 \end{table*}
 
-\subsection{Reachy Mini Camera and Face Recognition}
-\label{subsec:face}
-
-The Reachy Mini client uses OpenCV and YuNet~\cite{wu2023yunet} to detect a single complete face. The default acquisition procedure requires a bounding box of at least 120 pixels per side and an intersection over union of at least 0.65 with the first box. The client collects five distinct frames during a stable acquisition lasting at least one second. It ranks the face crops by a score combining sharpness, exposure and the fraction of clipped pixels, then sends the three highest-ranked crops to a local vision service.
-
-The service aligns each face and obtains a 512-dimensional FaceNet embedding through DeepFace~\cite{schroff2015facenet,serengil2020lightface}. For each frame and enrolled profile, it takes the smallest cosine distance between the crop embedding and the profile's reference embeddings. It ranks profiles by their median distance across at least two valid frames. Acceptance requires a median distance of at most 0.50, a margin of at least 0.05 to the next candidate when one exists, and agreement from at least two individual frame decisions. The service returns an unknown identity when these conditions are unmet.
-
-Acquisition stability limits variation between frames. The distance threshold and margin address weak or ambiguous matches, and the frame agreement requirement reduces the influence of a single crop. When multiple faces are visible, the single-face requirement can delay a decision. The household trial reports aggregate outcomes using these configuration defaults.
-
-\subsection{Local Agent Integration}
-\label{subsec:case-agents}
-
-The prototype runs Qwen3-4B-Instruct-2507 in Q4\_K\_M quantisation through Ollama~\cite{qwen2025instruct}. The text evaluation fixes the resident profile and supplies an explicit reference time with each Spanish user turn. The coordinator makes three sequential model calls. The first selects a supported operation from the current turn and recent dialogue, and the metric engine computes the result. The second selects a candidate activity episode or abstains. It can also extract a statement directly from the user turn. The third generates a reply from selected evidence and recent dialogue.
-
-The coordinator checks the structured outputs of the first two roles. The reply instructions require the model to preserve the distinction among measurements, estimates and user statements, and to use the time interval returned by the metric service. The prototype retains the two preceding exchanges and the latest event per source. It marks television power events as recent for ten minutes and user statements for fifteen minutes.
-
-In one scripted exchange, the user says they are reading a novel in another room. At 12:41, the television power rises from 1.0 to 70.6~W. The assistant can refer to both items on later turns. The statement describes what the user reported doing, while the power change describes the appliance. Keeping the sources distinct allows a reply about the television to use the measured change without assigning the user to the room or attributing viewing behaviour to them.
-
-\section{\uppercase{Evaluation}}
+\subsection{\uppercase{Evaluation}}
 \label{sec:evaluation}
 
 The evaluation addresses three questions at different levels. The recognition trial examines whether the camera can identify the target resident (RQ1). The dialogue review examines how replies use evidence across turns (RQ2). The paired event test isolates the effect of supplying a detail in a structured event (RQ3).
 
-\subsection{Household Recognition}
-\label{subsec:eval-face}
+\paragraph{Household Recognition}
 
 The target-user trial comprised 50 recognition attempts in a household that included the resident's spouse and two children aged 11 and 14. It yielded 48 correct outcomes (96\%). The available aggregate gives the overall result for this household. It leaves probe composition, acquisition conditions and the distribution of errors unresolved.
 
-\subsection{Dialogue Evaluation}
-\label{subsec:eval-replay}
+\paragraph{Dialogue Evaluation}
+
 
 The dialogue evaluation comprised 50 scripted user turns grouped into 15 exchanges. Each turn was assigned a reference time within the 72-hour observation period or at its endpoint. The Spanish prompts represent routine situations, including greetings, questions about recent activity, follow-ups about measurements and corrections of activity estimates. Two exchanges introduced goals concerning daily movement and vegetable intake, allowing the model to formulate suggestions in the context of the conversation.
 
 An LLM-assisted rubric review examined the visible replies against the sensor evidence and the preceding dialogue. It checked the use of the requested period and source, the distinction between observations and estimates, and the handling of missing evidence. For quantitative questions, it also checked the reported value against the metric service output. The trace links each reply to the user turn, reference time, selected operation and contextual evidence.
 
-\subsection{Paired Event-Payload Probe}
-\label{subsec:eval-probe}
+\paragraph{Paired Event-Payload Probe}
 
 The event probe invokes the conversational role twice for each of 12 questions. For each pair, it holds the reference time, model, question, preceding dialogue, metrics and activity context fixed. The conditions differ in whether the event list contains the target event, and their order alternates across pairs. Eight questions ask for a detail from a scripted user statement after two unrelated exchanges. Four ask for the values immediately before and after a recorded change in television power. For the power cases, the fixed metric context includes the current reading and its difference from the rolling median.
 
@@ -291,9 +293,11 @@ Total & 12/12 & 0/12 \\
 \subsection{Results and Analysis}
 \label{subsec:eval-findings}
 
-The dialogue review illustrates why a correct calculation and a well-grounded reply are distinct outcomes. In an exercise follow-up, the assistant reported the eight-minute interval available at the query cutoff. When asked about exercise that morning, it used a different time window and reported that no clear episode was present. In the humidity exchange, it identified 13:29 as the time of the reading and left the onset of the rise unresolved. In the watch exchange, it reported that bedtime mode ended at 09:57 and distinguished that event from getting out of bed. In a recall exchange, however, it denied having been told the book genre even though the event context contained the user's statement. The reply therefore failed to use available evidence.
+The dialogue review provides examples of how time-scoped queries support follow-up questions about everyday activities. Asked about recent exercise, the assistant reported the eight-minute interval available at the query cutoff. A follow-up about that morning led it to query the corresponding time window and report that the record contained no clear episode. The assistant also interpreted sensor timestamps appropriately. It reported 13:29 as the time of the humidity reading and left the onset of the rise open. In the watch exchange, it reported that bedtime mode ended at 09:57 and treated the time of getting out of bed as a separate question.
 
-The paired probe recovered all 12 target details when the event was supplied and none when it was withheld (Table~\ref{tab:probe}). One successful retrieval attributed the detail to the wrong speaker. In the withheld-event condition, ten replies acknowledged that the information was unavailable and two supplied unsupported details. One named a different plant. The other reported the current power reading as the value before the change. These cases show why retrieval, source attribution and appropriate abstention require separate checks.
+Structured events helped the assistant recover details from earlier in an exchange and from the sensor record. In the paired probe, it recovered all 12 target details when the event was supplied (Table~\ref{tab:probe}), including details from earlier user statements and readings on either side of a change in television power. With the event withheld, it recovered none of the target details and acknowledged the missing information in ten of the 12 replies.
+
+A few cases clarify where additional checks would help. In the dialogue review, the assistant overlooked a statement about the book genre that was still available in the event context. In the paired probe, one reply retrieved the requested detail but attributed it to the wrong speaker. Two replies supplied unsupported details when the event was withheld. One named a different plant, and the other used the current power reading as the value before the change. These cases give specific criteria for checking whether a reply retrieves the right detail, attributes it to the right source and acknowledges missing evidence.
 
 \FloatBarrier
 \section{\uppercase{Discussion and Conclusions}}
